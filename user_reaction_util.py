@@ -4,12 +4,18 @@ from collections import defaultdict
 
 # Dictionary to store how many times a user has posted a link
 user_link_count = defaultdict(int)
+web_link_count = {}
 
 # Regular expression to check for URLs in a message
 url_pattern = re.compile(r'https?://[^\s]+')
+# Regex pattern for extracting domain
+domain_pattern = r'(?:https?://)?(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})'
 
 # Increments user link count
 async def url_posted(message):
+    match = re.search(domain_pattern, message.content)
+    connectionDetails.get('host', 1)
+    web_link_count.get(match, 1)
     user_link_count[message.author.id] += 1
 
 # Check how many links a user has posted

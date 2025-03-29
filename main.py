@@ -5,6 +5,8 @@ import user_reaction_util
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.messages = True     # To recieve message events
+intents.reactions = True    # To recieve reaction events
 
 client = discord.Client(intents=intents)
 
@@ -36,6 +38,19 @@ async def on_message(message):
     if message.content.startswith(f'$link'):
         command_text = message.content[len('$link'):].strip()
         await message.channel.send( await user_reaction_util.get_other_user_link_count(int(command_text)))
+
+@client.event
+async def on_reaction_add(reaction, user):
+    # Potential problem: on_reaction_add() only seems to capture the reaction 
+    # of links that have been posted after the bot started running. 
+
+    print(f'{user} reacted with {reaction.emoji}')
+
+    if reaction.message.author == client.user:
+        return  # Skips reactions to the bot's messages, unsure if this is desired 
+
+    # reaction.emoji grants access to the emoji
+    
 
 
 

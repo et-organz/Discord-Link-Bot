@@ -9,4 +9,5 @@ idna==3.10
 multidict==6.1.0
 propcache==0.3.0
 psycopg2-binary==2.9.10
+python-dotenv==1.1.0
 yarl==1.18.3

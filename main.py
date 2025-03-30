@@ -1,7 +1,13 @@
 import discord
+import os
+from dotenv import load_dotenv
 import re
 from link_util import convert_link
 import user_reaction_util
+
+load_dotenv()
+
+api_key = os.getenv("API_KEY")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -56,4 +62,4 @@ async def on_reaction_add(reaction, user):
 
 
 
-client.run('MTM0NzgxMjY3MTQ0NTAxMjUyMg.G10ccd.YDZhOHkvmpQu1d1czMoSR7uLPm03CKEP2peyCE')
+client.run(api_key)

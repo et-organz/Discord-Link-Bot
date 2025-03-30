@@ -2,4 +2,4 @@
 env
 .env
 /.venv
-__pychache__
+__pychache__/

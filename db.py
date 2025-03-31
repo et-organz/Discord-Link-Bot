@@ -1,12 +1,22 @@
 import psycopg2
+import asyncpg
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables
+database=os.getenv("DB_NAME")
+user=os.getenv("DB_USER")
+password=os.getenv("DB_PASSWORD") 
+host=os.getenv("DB_HOST")
+port=os.getenv("DB_PORT")
 
 # Define connection parameters
 db_params = {
-    "dbname": "your_database_name",
-    "user": "your_username",
-    "password": "your_password",
-    "host": "your_host",  # e.g., "localhost" or an IP address
-    "port": "5432"  # Default PostgreSQL port
+    "dbname": database,
+    "user": user,
+    "password": password,
+    "host": host,      
+    "port":port   
 }
 
 try:

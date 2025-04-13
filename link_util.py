@@ -10,17 +10,22 @@ def convert_link(message):
 
     if re.search(INSTAGRAM_REGEX, message.content):
         modified_url = re.sub(r"instagram", "instagramez", message.content)
+        return [modified_url,'instagram']
 
     elif re.search(TWITTER_REGEX, message.content):
         modified_url = re.sub(r"(twitter|x)", "twitterez", message.content)
+        return [modified_url, 'twitter']
 
     elif re.search(TIKTOK_REGEX, message.content):
         modified_url = re.sub(r"tiktok", "tiktokez", message.content)
+        return [modified_url, 'tiktok']
 
     elif re.search(REDDIT_REGEX, message.content):
         modified_url = re.sub(r"reddit", "redditez", message.content)
+        return [modified_url, 'reddit']
 
     elif re.search(FACEBOOK_REGEX, message.content):
         modified_url = re.sub(r"facebook", "facebookez", message.content)
+        return [modified_url, 'facebook']
 
-    return modified_url
+    return [modified_url,modified_url]

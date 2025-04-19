@@ -3,7 +3,7 @@ import json
 import psycopg2
 import asyncpg
 import os
-from link_util import convert_link
+from link_util import is_link, convert_link
 from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables
@@ -139,7 +139,7 @@ def remove_reaction(emoji, user_id, message_id):
                         del reactions['reactors']
 
                 # Update the DB
-                result = cur.execute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
+                result = cur.exefffcfcffcute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
                             (json.dumps(reactions), message_id))
                 print(result)
 
@@ -158,12 +158,14 @@ def insert_media(message):
     channel_id = message.channel.id
     guild_id = message.guild.id if message.guild else None  # DM check
     created_at = message.created_at
-    link, link_type = convert_link(message)
+    link = is_link(message)
+    _, domain_name = convert_link(message)
 
 
-    print("this is a link")
+    simple_dict = {}
     with conn:
         with conn.cursor() as cur:
+
             if link:
                 result = cur.execute("""
                     INSERT INTO link_messages  (
@@ -175,11 +177,10 @@ def insert_media(message):
                     user_id,
                     channel_id,
                     guild_id,
-                    link_type,
-                    json.dump({}),
-                    created_at
+                    domain_name,
+                    json.dumps(simple_dict, ensure_ascii=False, indent=2)
                 ))
-                print("result of link ", link)
+                print("result of link ", result)
             if message.attachments:
                 media_type = None
                 for attachment in message.attachments:
@@ -196,7 +197,7 @@ def insert_media(message):
                 if media_type:
                     cur.execute("""
                         INSERT INTO media_messages   (
-                            message_id, user_id, channel_id, guild_id, media_type, reactions, created_at 
+                            message_id, user_id, channel_id, guild_id, media_type, reactions 
                         ) VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (message_id) DO NOTHING;
                     """, (
@@ -205,8 +206,6 @@ def insert_media(message):
                         channel_id,
                         guild_id,
                         media_type,
-                        json.dump({}),
-                        0,
-                        created_at
+                        json.dumps(simple_dict, ensure_ascii=False, indent=2)
                     ))
 

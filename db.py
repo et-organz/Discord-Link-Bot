@@ -139,8 +139,9 @@ def remove_reaction(emoji, user_id, message_id):
                         del reactions['reactors']
 
                 # Update the DB
-                cur.execute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
+                result = cur.execute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
                             (json.dumps(reactions), message_id))
+                print(result)
 
             update_db('link_messages')
             update_db('media_messages')
@@ -160,11 +161,11 @@ def insert_media(message):
     link, link_type = convert_link(message)
 
 
-
+    print("this is a link")
     with conn:
         with conn.cursor() as cur:
             if link:
-                cur.execute("""
+                result = cur.execute("""
                     INSERT INTO link_messages  (
                         message_id, user_id, channel_id, guild_id, domain_name, reactions
                     ) VALUES (%s, %s, %s, %s, %s, %s)
@@ -178,7 +179,7 @@ def insert_media(message):
                     json.dump({}),
                     created_at
                 ))
-
+                print("result of link ", link)
             if message.attachments:
                 media_type = None
                 for attachment in message.attachments:

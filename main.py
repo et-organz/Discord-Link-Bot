@@ -32,6 +32,7 @@ async def on_message(message):
     if message.author == client.user:
         return
 
+    db.insert_media(message)
 
     if message.content.startswith('$hello'):
         await message.channel.send('Hello!')

@@ -93,34 +93,35 @@ def add_reaction(emoji,user_id,message_id):
             def update_db(db):
                 cur.execute(f'SELECT reactions FROM {db} WHERE message_id = %s;', (message_id,))
                 result = cur.fetchone()
-                reactions = result[0] if result and result[0] else {}
-                if reactions == {}:
+                if result is None:
                     return
+                reactions = result[0] if result and result[0] else {}
+
                 # Add user ID to the emoji list if not already present
                 if emoji not in reactions:
                     reactions[emoji] = []
                 if 'reactors' not in reactions:
-                    reactions['reactors'] = {'user_id':[emoji]}
+                    reactions['reactors'] = {user_id:[emoji]}
                 else:
-                    reactions['reactors']['user_id'].append(emoji)
+                    reactions['reactors'][user_id].append(emoji)
 
                 if user_id not in reactions[emoji]:
                     reactions[emoji].append(user_id)
                 # Update the DB
                 cur.execute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
                             (json.dumps(reactions), message_id))
-
             update_db('link_messages')
             update_db('media_messages')
+
 def remove_reaction(emoji, user_id, message_id):
     with conn:
         with conn.cursor() as cur:
             def update_db(db):
                 cur.execute(f'SELECT reactions FROM {db} WHERE message_id = %s;', (message_id,))
                 result = cur.fetchone()
-                reactions = result[0] if result and result[0] else {}
-                if reactions == {}:
+                if result is None:
                     return
+                reactions = result[0] if result and result[0] else {}
 
                 # Remove the user from the emoji's list
                 if emoji in reactions and user_id in reactions[emoji]:
@@ -129,19 +130,20 @@ def remove_reaction(emoji, user_id, message_id):
                         del reactions[emoji]
 
                 # Remove from 'reactors' if present
-                if 'reactors' in reactions and 'user_id' in reactions['reactors']:
-                    if emoji in reactions['reactors']['user_id']:
-                        reactions['reactors']['user_id'].remove(emoji)
+                user_id_str = str(user_id)
+                if 'reactors' in reactions and user_id_str in reactions['reactors']:
+
+                    if emoji in reactions['reactors'][user_id_str]:
+                        reactions['reactors'][user_id_str].remove(emoji)
                     # Clean up if empty
-                    if not reactions['reactors']['user_id']:
-                        del reactions['reactors']['user_id']
+                    if len(reactions['reactors'][user_id_str]) == 0:
+                        del reactions['reactors'][user_id_str]
                     if not reactions['reactors']:
                         del reactions['reactors']
 
                 # Update the DB
-                result = cur.exefffcfcffcute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
+                cur.execute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
                             (json.dumps(reactions), message_id))
-                print(result)
 
             update_db('link_messages')
             update_db('media_messages')
@@ -179,10 +181,9 @@ def insert_media(message):
                     domain_name,
                     json.dumps(simple_dict, ensure_ascii=False, indent=2)
                 ))
-                print("went to link")
+
             if message.attachments:
                 media_type = None
-                print("went to media")
                 for attachment in message.attachments:
                     content_type = attachment.content_type or attachment.filename
                     if "image" in content_type:

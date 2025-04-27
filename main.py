@@ -89,20 +89,6 @@ async def on_message(message):
         else:
             response = "No domains found."
         await message.channel.send(response)
-
-
-
-@client.event
-async def on_reaction_add(reaction, user):
-    # Potential problem: on_reaction_add() only seems to capture the reaction 
-    # of links that have been posted after the bot started running. 
-
-    print(f'{user} reacted with {reaction.emoji}')
-
-    if reaction.message.author == client.user:
-        return  # Skips reactions to the bot's messages, unsure if this is desired 
-
-    # reaction.emoji grants access to the emoji
     
 
 @client.event
@@ -110,7 +96,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     emoji = str(payload.emoji)
     user_id = payload.user_id
     message_id = payload.message_id
-
+    print(f'{user_id} raw reacted with {emoji} with messageid{message_id}')
     # Ignore the bot itself
     if user_id == client.user.id:
         return

@@ -5,6 +5,8 @@ import re
 from link_util import convert_link
 import user_reaction_util
 import db
+from discord.ext import commands
+import gif_util 
 load_dotenv()
 
 api_key = os.getenv("API_KEY")
@@ -14,10 +16,40 @@ intents.message_content = True
 intents.messages = True     # To recieve message events
 intents.reactions = True    # To recieve reaction events
 
+bot = commands.Bot(command_prefix="!", intents=intents)
 client = discord.Client(intents=intents)
 
 # Define the channel ID where you want to count the links
 TARGET_CHANNEL_ID = 1347815817080999969
+
+# Command to create a GIF from a video link
+@bot.command()
+async def makegif(ctx, start_time: float, video_url: str):
+    await ctx.send("Downloading and processing your video... 🎬")
+
+    # Temporary paths for the video and GIF
+    input_video_path = "temp_video.mp4"
+    output_gif_path = "output.gif"
+
+    try:
+        # Step 1: Download the video from the URL
+        gif_util.download_video(video_url, input_video_path)
+
+        # Step 2: Generate GIF
+        gif_util.video_to_gif(input_video_path, output_gif_path, start_time=start_time)
+
+        # Step 3: Send the gif
+        await ctx.send(file=discord.File(output_gif_path))
+
+    except Exception as e:
+        await ctx.send(f"An error occurred: {e}")
+
+    finally:
+        # Clean up files
+        if os.path.exists(input_video_path):
+            os.remove(input_video_path)
+        if os.path.exists(output_gif_path):
+            os.remove(output_gif_path)
 
 @client.event
 async def on_ready():
@@ -113,6 +145,7 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
         return
     print(f"Reaction removed: {emoji} by user {user_id} on message {message_id}")
     db.remove_reaction(emoji, user_id, message_id)
+
 
 
 

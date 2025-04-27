@@ -3,7 +3,7 @@ import json
 import psycopg2
 import asyncpg
 import os
-from link_util import is_link, convert_link
+from link_util import is_link, get_url_type
 from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables
@@ -157,9 +157,8 @@ def insert_media(message):
     user_id = message.author.id
     channel_id = message.channel.id
     guild_id = message.guild.id if message.guild else None  # DM check
-    created_at = message.created_at
     link = is_link(message)
-    _, domain_name = convert_link(message)
+    domain_name = get_url_type(message)
 
 
     simple_dict = {}
@@ -180,9 +179,10 @@ def insert_media(message):
                     domain_name,
                     json.dumps(simple_dict, ensure_ascii=False, indent=2)
                 ))
-                print("result of link ", result)
+                print("went to link")
             if message.attachments:
                 media_type = None
+                print("went to media")
                 for attachment in message.attachments:
                     content_type = attachment.content_type or attachment.filename
                     if "image" in content_type:

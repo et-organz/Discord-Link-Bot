@@ -36,7 +36,7 @@ async def on_message(message):
 
     if message.content.startswith('$hello'):
         await message.channel.send('Hello!')
-    converted_url = convert_link(message)[0]
+    converted_url = convert_link(message)
     if converted_url:
         await message.channel.send(converted_url)
     if user_reaction_util.url_pattern.search(message.content):

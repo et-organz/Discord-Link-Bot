@@ -13,28 +13,49 @@ def is_link(message):
         return True
     return False
 
+def get_url_type(message):
+    modified_url = "unknown"
+
+    if re.search(INSTAGRAM_REGEX, message.content):
+        modified_url = "instagram"
+
+    elif re.search(TWITTER_REGEX, message.content):
+        modified_url = "twitter"
+
+    elif re.search(TIKTOK_REGEX, message.content):
+        modified_url = "tiktok"
+
+    elif re.search(REDDIT_REGEX, message.content):
+        modified_url = "reddit"
+
+    elif re.search(FACEBOOK_REGEX, message.content):
+        modified_url = "facebook"
+
+    elif re.search(YOUTUBE_REGEX, message.content):
+        modified_url = "youtube"
+    return modified_url
 
 def convert_link(message):
     modified_url = None
 
     if re.search(INSTAGRAM_REGEX, message.content):
         modified_url = re.sub(r"instagram", "instagramez", message.content)
-        return [modified_url,'instagram']
+        return modified_url
 
     elif re.search(TWITTER_REGEX, message.content):
         modified_url = re.sub(r"(twitter|x)", "twitterez", message.content)
-        return [modified_url, 'twitter']
+        return modified_url
 
     elif re.search(TIKTOK_REGEX, message.content):
         modified_url = re.sub(r"tiktok", "tiktokez", message.content)
-        return [modified_url, 'tiktok']
+        return modified_url
 
     elif re.search(REDDIT_REGEX, message.content):
         modified_url = re.sub(r"reddit", "redditez", message.content)
-        return [modified_url, 'reddit']
+        return modified_url
 
     elif re.search(FACEBOOK_REGEX, message.content):
         modified_url = re.sub(r"facebook", "facebookez", message.content)
-        return [modified_url, 'facebook']
+        return modified_url
 
-    return [modified_url,modified_url]
+    return modified_url

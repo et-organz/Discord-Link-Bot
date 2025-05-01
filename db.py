@@ -47,17 +47,31 @@ def get_top_links(guild_id):
     with conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT message_id, domain_name, reactions
-                FROM link_messages
-                WHERE guild_id = %s
-                ORDER BY (
-                    SELECT SUM(value::int)
-                    FROM jsonb_each_text(reactions)
-                    WHERE key != 'reactors'
-                ) DESC
-                LIMIT 5;
+            SELECT message_id, domain_name, reactions
+            FROM link_messages
+            WHERE guild_id = %s;
             """, (guild_id,))
-            return cur.fetchall()
+            messages = cur.fetchall()
+
+            # Step 2: Calculate total reactions for each message and sort by that value
+            message_reactions = []
+
+            for message in messages:
+                message_id = message[0]
+                domain_name = message[1]
+                reactions = message[2]  # Assuming reactions is stored as a JSON string
+                if not reactions:
+                    total_reactions = 0
+                else:
+                    # Calculate total reactions (excluding the 'reactors' key)
+                    total_reactions = len(reactions['reactors'])
+
+                message_reactions.append((message_id, domain_name, total_reactions))
+
+            # Step 3: Sort the messages by total reactions in descending order and return top 5
+            sorted_messages = sorted(message_reactions, key=lambda x: x[2], reverse=True)
+
+            return sorted_messages[:5]  # Return the top 5 messages
 
 def get_top_media(guild_id, media_type):
     print(f"Fetching top media for guild_id: {guild_id}, media_type: {media_type}")

@@ -67,8 +67,7 @@ Available commands:
         top_links = db.get_top_links(guild_id)
         response = "**Top 5 Links:**\n"
         for link in top_links:
-            message_id, domain, reactions = link
-            total_reacts = sum(int(v) for k, v in reactions.items() if k != "reactors")
+            message_id, domain, total_reacts = link
             response += f"- Message ID: {message_id}, Domain: `{domain}`, Reactions: {total_reacts}\n"
         await message.channel.send(response)
 

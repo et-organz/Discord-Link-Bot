@@ -36,6 +36,19 @@ async def on_message(message):
 
     db.insert_media(message)
 
+    # Custom help command
+    if message.content.startswith('$help'):
+        help_text = """
+Available commands:
+1. !makegif <start_time> <video_url> - Create a GIF from a video
+2. !top_links - View the top links in the server
+3. !top_image - View the top image in the server
+4. !top_video - View the top video in the server
+5. !top_gif - View the top GIF in the server
+6. !top_domain - View the top domain in the server
+        """
+        await message.channel.send(help_text)
+
     if message.content.startswith('$hello'):
         await message.channel.send('Hello!')
     converted_url = convert_link(message)
@@ -92,7 +105,7 @@ async def on_message(message):
             response = "No domains found."
         await message.channel.send(response)
     
-    elif message.content.startswith('!makegif'):
+    elif message.content.startswith('$makegif'):
         try:
             parts = message.content.split()
             if len(parts) < 3:

@@ -60,6 +60,7 @@ def get_top_links(guild_id):
             return cur.fetchall()
 
 def get_top_media(guild_id, media_type):
+    print(f"Fetching top media for guild_id: {guild_id}, media_type: {media_type}")
     with conn:
         with conn.cursor() as cur:
             cur.execute("""

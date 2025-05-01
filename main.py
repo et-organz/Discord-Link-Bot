@@ -16,40 +16,10 @@ intents.message_content = True
 intents.messages = True     # To recieve message events
 intents.reactions = True    # To recieve reaction events
 
-bot = commands.Bot(command_prefix="!", intents=intents)
 client = discord.Client(intents=intents)
 
 # Define the channel ID where you want to count the links
 TARGET_CHANNEL_ID = 1347815817080999969
-
-# Command to create a GIF from a video link
-@bot.command()
-async def makegif(ctx, start_time: float, video_url: str):
-    await ctx.send("Downloading and processing your video... 🎬")
-
-    # Temporary paths for the video and GIF
-    input_video_path = "temp_video.mp4"
-    output_gif_path = "output.gif"
-
-    try:
-        # Step 1: Download the video from the URL
-        gif_util.download_video(video_url, input_video_path)
-
-        # Step 2: Generate GIF
-        gif_util.video_to_gif(input_video_path, output_gif_path, start_time=start_time)
-
-        # Step 3: Send the gif
-        await ctx.send(file=discord.File(output_gif_path))
-
-    except Exception as e:
-        await ctx.send(f"An error occurred: {e}")
-
-    finally:
-        # Clean up files
-        if os.path.exists(input_video_path):
-            os.remove(input_video_path)
-        if os.path.exists(output_gif_path):
-            os.remove(output_gif_path)
 
 @client.event
 async def on_ready():
@@ -121,6 +91,35 @@ async def on_message(message):
         else:
             response = "No domains found."
         await message.channel.send(response)
+    
+    elif message.content.startswith('!makegif'):
+        try:
+            parts = message.content.split()
+            if len(parts) < 3:
+                await message.channel.send("Usage: `!makegif <start_time> <video_url>`")
+                return
+            
+            start_time = float(parts[1])
+            video_url = parts[2]
+
+            await message.channel.send("Downloading and processing your video... 🎬")
+
+            input_video_path = "temp_video.mp4"
+            output_gif_path = "output.gif"
+
+            gif_util.download_video(video_url, input_video_path)
+            gif_util.video_to_gif(input_video_path, output_gif_path, start_time=start_time)
+            await message.channel.send(file=discord.File(output_gif_path))
+
+        except Exception as e:
+            await message.channel.send(f"An error occurred: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            if os.path.exists("temp_video.mp4"):
+                os.remove("temp_video.mp4")
+            if os.path.exists("output.gif"):
+                os.remove("output.gif")
     
 
 @client.event

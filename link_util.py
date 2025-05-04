@@ -7,11 +7,15 @@ FACEBOOK_REGEX = r"(https?://)?(www\.)?facebook\.com/reel/[\w\d./?=&-]+"
 YOUTUBE_REGEX = r"(?:https?://)?(?:www\.)?(?:youtube\.com/(?:watch\?v=|embed/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{11})"
 # Regex pattern for extracting domain
 domain_pattern = r'(?:https?://)?(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})'
-def is_link(message):
-    match = re.search(domain_pattern, message.content)
+
+link_pattern = r'https?://[^\s]+'  # Matches http/https URLs
+def get_link_from_message(message):
+    match = re.search(link_pattern, message.content)
     if match:
-        return True
-    return False
+        first_url = match.group() # Get the first URL found
+        return first_url
+    else:
+        return None
 
 def get_url_type(message):
     modified_url = "unknown"

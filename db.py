@@ -3,7 +3,7 @@ import json
 import psycopg2
 import asyncpg
 import os
-from link_util import is_link, get_url_type
+from link_util import get_link_from_message, get_url_type
 from dotenv import load_dotenv
 
 load_dotenv()  # Load environment variables
@@ -43,11 +43,12 @@ try:
 except Exception as e:
     print("Error connecting to the database:", e)
 conn = psycopg2.connect(**db_params)
-def get_top_links(guild_id):
+
+def get_top_links(guild_id,size):
     with conn:
         with conn.cursor() as cur:
             cur.execute("""
-            SELECT message_id, domain_name, reactions
+            SELECT link, domain_name, reactions
             FROM link_messages
             WHERE guild_id = %s;
             """, (guild_id,))
@@ -57,7 +58,7 @@ def get_top_links(guild_id):
             message_reactions = []
 
             for message in messages:
-                message_id = message[0]
+                link = message[0]
                 domain_name = message[1]
                 reactions = message[2]  # Assuming reactions is stored as a JSON string
                 if not reactions:
@@ -66,29 +67,41 @@ def get_top_links(guild_id):
                     # Calculate total reactions (excluding the 'reactors' key)
                     total_reactions = len(reactions['reactors'])
 
-                message_reactions.append((message_id, domain_name, total_reactions))
+                message_reactions.append((link, domain_name, total_reactions))
 
             # Step 3: Sort the messages by total reactions in descending order and return top 5
             sorted_messages = sorted(message_reactions, key=lambda x: x[2], reverse=True)
 
-            return sorted_messages[:5]  # Return the top 5 messages
+            return sorted_messages[:size]
 
-def get_top_media(guild_id, media_type):
-    print(f"Fetching top media for guild_id: {guild_id}, media_type: {media_type}")
+def get_top_media(guild_id, media_type, size):
+
     with conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT message_id, reactions
+                SELECT media_url, reactions
                 FROM media_messages
                 WHERE guild_id = %s AND media_type = %s
-                ORDER BY (
-                    SELECT SUM(value::int)
-                    FROM jsonb_each_text(reactions)
-                    WHERE key != 'reactors'
-                ) DESC
-                LIMIT 1;
             """, (guild_id, media_type))
-            return cur.fetchone()
+            messages = cur.fetchall()
+            # Step 2: Calculate total reactions for each message and sort by that value
+            message_reactions = []
+
+            for message in messages:
+                media_url = message[0]
+                reactions = message[1]
+                if not reactions:
+                    total_reactions = 0
+                else:
+                    # Calculate total reactions (excluding the 'reactors' key)
+                    total_reactions = len(reactions['reactors'])
+
+                message_reactions.append((media_url, total_reactions))
+
+            # Step 3: Sort the messages by total reactions in descending order and return top 5
+            sorted_messages = sorted(message_reactions, key=lambda x: x[1], reverse=True)
+
+            return sorted_messages[:size]
 
 def get_top_domain(guild_id):
     with conn:
@@ -174,7 +187,7 @@ def insert_media(message):
     user_id = message.author.id
     channel_id = message.channel.id
     guild_id = message.guild.id if message.guild else None  # DM check
-    link = is_link(message)
+    link = get_link_from_message(message)
     domain_name = get_url_type(message)
 
 
@@ -185,8 +198,8 @@ def insert_media(message):
             if link:
                 result = cur.execute("""
                     INSERT INTO link_messages  (
-                        message_id, user_id, channel_id, guild_id, domain_name, reactions
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                        message_id, user_id, channel_id, guild_id, domain_name, link, reactions
+                    ) VALUES (%s, %s, %s, %s, %s,%s, %s)
                     ON CONFLICT (message_id) DO NOTHING;
                 """, (
                     message_id,
@@ -194,33 +207,41 @@ def insert_media(message):
                     channel_id,
                     guild_id,
                     domain_name,
+                    link,
                     json.dumps(simple_dict, ensure_ascii=False, indent=2)
                 ))
-
+            print("we went to messages ",message_id)
             if message.attachments:
+
                 media_type = None
+                media_url = None
                 for attachment in message.attachments:
                     content_type = attachment.content_type or attachment.filename
                     if "image" in content_type:
                         media_type = "image"
+                        media_url = attachment.url
                         break
                     elif "video" in content_type:
                         media_type = "video"
+                        media_url = attachment.url
                         break
                     elif "gif" in content_type or attachment.filename.lower().endswith(".gif"):
                         media_type = "gif"
+                        media_url = attachment.url
                         break
                 if media_type:
+
                     cur.execute("""
                         INSERT INTO media_messages   (
-                            message_id, user_id, channel_id, guild_id, media_type, reactions 
-                        ) VALUES (%s, %s, %s, %s, %s, %s)
+                            message_id, user_id, channel_id, guild_id, media_url, media_type, reactions 
+                        ) VALUES (%s, %s, %s, %s, %s,%s, %s)
                         ON CONFLICT (message_id) DO NOTHING;
                     """, (
                         message_id,
                         user_id,
                         channel_id,
                         guild_id,
+                        media_url,
                         media_type,
                         json.dumps(simple_dict, ensure_ascii=False, indent=2)
                     ))

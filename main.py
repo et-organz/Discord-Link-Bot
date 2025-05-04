@@ -34,7 +34,7 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    db.insert_media(message)
+
 
     # Custom help command
     if message.content.startswith('$help'):
@@ -51,9 +51,6 @@ Available commands:
 
     if message.content.startswith('$hello'):
         await message.channel.send('Hello!')
-    converted_url = convert_link(message)
-    if converted_url:
-        await message.channel.send(converted_url)
     if user_reaction_util.url_pattern.search(message.content):
         await user_reaction_util.url_posted(message)
     if message.content.startswith(f'$links'):
@@ -62,55 +59,60 @@ Available commands:
         command_text = message.content[len('$link'):].strip()
         await message.channel.send( await user_reaction_util.get_other_user_link_count(int(command_text)))
     guild_id = message.guild.id
-
+    converted_url = convert_link(message)
+    if converted_url:
+        await message.channel.send(converted_url)
     if message.content.startswith('$top_links'):
-        top_links = db.get_top_links(guild_id)
+        top_links = db.get_top_links(guild_id, 5)
         response = "**Top 5 Links:**\n"
-        for link in top_links:
-            message_id, domain, total_reacts = link
-            response += f"- Message ID: {message_id}, Domain: `{domain}`, Reactions: {total_reacts}\n"
+        for val in top_links:
+            link, domain_name, total_reactions = val
+            response += f"- Link: {link}, Domain: `{domain_name}`, Reactions: {total_reactions}\n"
         await message.channel.send(response)
 
     elif message.content.startswith('$top_image'):
-        top_image = db.get_top_media(guild_id, 'image')
+        top_image = db.get_top_media(guild_id, 'image',1)
         if top_image:
-            response = f"**Top Image Post:** Message ID: {top_image[0]}, Reactions: {top_image[1]}"
+            media_url, total_reactions = top_image[0]
+            response = f"**Top Image Post:** Image: {media_url}, Reactions: {total_reactions}"
         else:
             response = "No top image found."
         await message.channel.send(response)
 
     elif message.content.startswith('$top_video'):
-        top_video = db.get_top_media(guild_id, 'video')
+        top_video = db.get_top_media(guild_id, 'video', 1)
         if top_video:
-            response = f"**Top Video Post:** Message ID: {top_video[0]}, Reactions: {top_video[1]}"
+            media_url, total_reactions = top_video[0]
+            response = f"**Top Video Post:** Video: {media_url}, Reactions: {total_reactions}"
         else:
             response = "No top video found."
         await message.channel.send(response)
 
     elif message.content.startswith('$top_gif'):
-        top_gif = db.get_top_media(guild_id, 'gif')
+        top_gif = db.get_top_media(guild_id, 'gif', 1)
         if top_gif:
-            response = f"**Top GIF Post:** Message ID: {top_gif[0]}, Reactions: {top_gif[1]}"
+            media_url, total_reactions = top_gif[0]
+            response = f"**Top GIF Post:** Gif: {media_url}, Reactions: {total_reactions}"
         else:
             response = "No top GIF found."
         await message.channel.send(response)
 
     elif message.content.startswith('$top_domain'):
-        top_domain = db.get_top_domain(guild_id)
+        top_domain = db.get_top_domain(guild_id, 1)
         if top_domain:
-            domain, count = top_domain
+            domain, count = top_domain[0]
             response = f"**Most Linked Domain:** `{domain}` with {count} links."
         else:
             response = "No domains found."
         await message.channel.send(response)
-    
+
     elif message.content.startswith('$makegif'):
         try:
             parts = message.content.split()
             if len(parts) < 3:
                 await message.channel.send("Usage: `!makegif <start_time> <video_url>`")
                 return
-            
+
             start_time = float(parts[1])
             video_url = parts[2]
 
@@ -132,6 +134,8 @@ Available commands:
                 os.remove("temp_video.mp4")
             if os.path.exists("output.gif"):
                 os.remove("output.gif")
+    else:
+        db.insert_media(message)
     
 
 @client.event

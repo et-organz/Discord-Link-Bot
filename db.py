@@ -48,7 +48,7 @@ def get_top_links(guild_id,size):
     with conn:
         with conn.cursor() as cur:
             cur.execute("""
-            SELECT link, domain_name, reactions
+            SELECT link, domain_name, reactions, user_id
             FROM link_messages
             WHERE guild_id = %s;
             """, (guild_id,))
@@ -61,13 +61,14 @@ def get_top_links(guild_id,size):
                 link = message[0]
                 domain_name = message[1]
                 reactions = message[2]  # Assuming reactions is stored as a JSON string
+                user_id = message[3]
                 if not reactions:
                     total_reactions = 0
                 else:
                     # Calculate total reactions (excluding the 'reactors' key)
                     total_reactions = len(reactions['reactors'])
 
-                message_reactions.append((link, domain_name, total_reactions))
+                message_reactions.append((link, domain_name, total_reactions, user_id))
 
             # Step 3: Sort the messages by total reactions in descending order and return top 5
             sorted_messages = sorted(message_reactions, key=lambda x: x[2], reverse=True)
@@ -79,7 +80,7 @@ def get_top_media(guild_id, media_type, size):
     with conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT media_url, reactions
+                SELECT media_url, reactions, user_id
                 FROM media_messages
                 WHERE guild_id = %s AND media_type = %s
             """, (guild_id, media_type))
@@ -90,13 +91,14 @@ def get_top_media(guild_id, media_type, size):
             for message in messages:
                 media_url = message[0]
                 reactions = message[1]
+                user_id = message[2]
                 if not reactions:
                     total_reactions = 0
                 else:
                     # Calculate total reactions (excluding the 'reactors' key)
                     total_reactions = len(reactions['reactors'])
 
-                message_reactions.append((media_url, total_reactions))
+                message_reactions.append((media_url, total_reactions, user_id))
 
             # Step 3: Sort the messages by total reactions in descending order and return top 5
             sorted_messages = sorted(message_reactions, key=lambda x: x[1], reverse=True)
@@ -210,25 +212,25 @@ def insert_media(message):
                     link,
                     json.dumps(simple_dict, ensure_ascii=False, indent=2)
                 ))
-            print("we went to messages ",message_id)
             if message.attachments:
 
                 media_type = None
                 media_url = None
                 for attachment in message.attachments:
                     content_type = attachment.content_type or attachment.filename
-                    if "image" in content_type:
-                        media_type = "image"
+                    if "gif" in content_type or attachment.filename.lower().endswith(".gif"):
+                        media_type = "gif"
                         media_url = attachment.url
                         break
                     elif "video" in content_type:
                         media_type = "video"
                         media_url = attachment.url
                         break
-                    elif "gif" in content_type or attachment.filename.lower().endswith(".gif"):
-                        media_type = "gif"
+                    elif "image" in content_type:
+                        media_type = "image"
                         media_url = attachment.url
                         break
+
                 if media_type:
 
                     cur.execute("""

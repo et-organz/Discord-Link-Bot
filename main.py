@@ -21,6 +21,7 @@ client = discord.Client(intents=intents)
 # Define the channel ID where you want to count the links
 TARGET_CHANNEL_ID = 1347815817080999969
 
+
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
@@ -33,8 +34,6 @@ async def on_ready():
 async def on_message(message):
     if message.author == client.user:
         return
-
-
 
     # Custom help command
     if message.content.startswith('$help'):
@@ -66,15 +65,17 @@ Available commands:
         top_links = db.get_top_links(guild_id, 5)
         response = "**Top 5 Links:**\n"
         for val in top_links:
-            link, domain_name, total_reactions = val
-            response += f"- Link: {link}, Domain: `{domain_name}`, Reactions: {total_reactions}\n"
+            link, domain_name, total_reactions, user_id = val
+            user_name = await client.fetch_user(user_id)
+            response += f"- Domain: `{domain_name}`, Reactions: {total_reactions}, Posted by user: {user_name}, Link: {link}\n"
         await message.channel.send(response)
 
     elif message.content.startswith('$top_image'):
         top_image = db.get_top_media(guild_id, 'image',1)
         if top_image:
-            media_url, total_reactions = top_image[0]
-            response = f"**Top Image Post:** Image: {media_url}, Reactions: {total_reactions}"
+            media_url, total_reactions, user_id = top_image[0]
+            user_name = await client.fetch_user(user_id)
+            response = f"**Top Image Post:** Reactions: {total_reactions}, Posted by user: {user_name}, Image: {media_url}"
         else:
             response = "No top image found."
         await message.channel.send(response)
@@ -82,8 +83,9 @@ Available commands:
     elif message.content.startswith('$top_video'):
         top_video = db.get_top_media(guild_id, 'video', 1)
         if top_video:
-            media_url, total_reactions = top_video[0]
-            response = f"**Top Video Post:** Video: {media_url}, Reactions: {total_reactions}"
+            media_url, total_reactions, user_id = top_video[0]
+            user_name = await client.fetch_user(user_id)
+            response = f"**Top Video Post:** Reactions: {total_reactions}, Posted by user: {user_name}, Video: {media_url}"
         else:
             response = "No top video found."
         await message.channel.send(response)
@@ -91,8 +93,9 @@ Available commands:
     elif message.content.startswith('$top_gif'):
         top_gif = db.get_top_media(guild_id, 'gif', 1)
         if top_gif:
-            media_url, total_reactions = top_gif[0]
-            response = f"**Top GIF Post:** Gif: {media_url}, Reactions: {total_reactions}"
+            media_url, total_reactions, user_id = top_gif[0]
+            user_name = await client.fetch_user(user_id)
+            response = f"**Top GIF Post:** Reactions: {total_reactions}, Posted by user: {user_name}, Gif: {media_url}"
         else:
             response = "No top GIF found."
         await message.channel.send(response)

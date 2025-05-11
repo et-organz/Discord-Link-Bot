@@ -137,6 +137,38 @@ Available commands:
                 os.remove("temp_video.mp4")
             if os.path.exists("output.gif"):
                 os.remove("output.gif")
+    elif message.content.startswith('$contest'):
+        args = message.content.split()
+        period = 'week'
+        if len(args) > 1 and args[1].lower() in ['week', 'month']:
+            period = args[1].lower()
+
+        top_links, top_media = db.get_top_posters(message.guild.id, period)
+
+        embed = discord.Embed(
+            title=f"🏆 {period.capitalize()}ly Contest Winners!",
+            description=f"Here are the top posters for the past {period}.",
+            color=discord.Color.gold()
+        )
+
+        link_str = ""
+        for i, (user_id, count) in enumerate(top_links):
+            user = await client.fetch_user(user_id)
+            link_str += f"{i+1}. {user.name} — {count} links\n"
+        if not link_str:
+            link_str = "No link posters found."
+
+        media_str = ""
+        for i, (user_id, count) in enumerate(top_media):
+            user = await client.fetch_user(user_id)
+            media_str += f"{i+1}. {user.name} — {count} media\n"
+        if not media_str:
+            media_str = "No media posters found."
+
+        embed.add_field(name="🔗 Top Link Posters", value=link_str, inline=False)
+        embed.add_field(name="🖼️ Top Media Posters", value=media_str, inline=False)
+        await message.channel.send(embed=embed)
+
     else:
         db.insert_media(message)
     

@@ -5,6 +5,7 @@ import asyncpg
 import os
 from link_util import get_link_from_message, get_url_type
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
 load_dotenv()  # Load environment variables
 database=os.getenv("DB_NAME")
@@ -248,3 +249,36 @@ def insert_media(message):
                         json.dumps(simple_dict, ensure_ascii=False, indent=2)
                     ))
 
+def get_top_posters(guild_id, period="week"):
+    if period == "week":
+        since = datetime.utcnow() - timedelta(days=7)
+    elif period == "month":
+        since = datetime.utcnow() - timedelta(days=30)
+    else:
+        raise ValueError("Period must be 'week' or 'month'.")
+
+    with conn:
+        with conn.cursor() as cur:
+            # Get top link posters
+            cur.execute("""
+                SELECT user_id, COUNT(*) as link_count
+                FROM link_messages
+                WHERE guild_id = %s AND created_at >= %s
+                GROUP BY user_id
+                ORDER BY link_count DESC
+                LIMIT 3;
+            """, (guild_id, since))
+            top_links = cur.fetchall()
+
+            # Get top media posters
+            cur.execute("""
+                SELECT user_id, COUNT(*) as media_count
+                FROM media_messages
+                WHERE guild_id = %s AND created_at >= %s
+                GROUP BY user_id
+                ORDER BY media_count DESC
+                LIMIT 3;
+            """, (guild_id, since))
+            top_media = cur.fetchall()
+
+    return top_links, top_media

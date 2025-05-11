@@ -21,14 +21,24 @@ client = discord.Client(intents=intents)
 # Define the channel ID where you want to count the links
 TARGET_CHANNEL_ID = 1347815817080999969
 
-
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
-    # Get the channel by ID
     channel = client.get_channel(TARGET_CHANNEL_ID)
     if channel:
+        print("Backfilling link and media history...")
+        messages = []
+        async for message in channel.history(limit=None, oldest_first=True):
+            if message.author.bot:
+                continue
+            messages.append(message)
+
+        link_inserted = db.backfill_links_from_history(messages, channel.guild.id)
+        media_inserted = db.backfill_media_from_history(messages, channel.guild.id)
+
+        print(f"Inserted {link_inserted} link(s) and {media_inserted} media file(s) into the database.")
         await user_reaction_util.count_links_in_channel(channel)
+
 
 @client.event
 async def on_message(message):
@@ -144,6 +154,7 @@ Available commands:
             period = args[1].lower()
 
         top_links, top_media = db.get_top_posters(message.guild.id, period)
+        print(top_links)
 
         embed = discord.Embed(
             title=f"🏆 {period.capitalize()}ly Contest Winners!",

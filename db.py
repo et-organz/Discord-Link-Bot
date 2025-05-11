@@ -3,9 +3,11 @@ import json
 import psycopg2
 import asyncpg
 import os
+import re
 from link_util import get_link_from_message, get_url_type
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 load_dotenv()  # Load environment variables
 database=os.getenv("DB_NAME")
@@ -13,6 +15,8 @@ user=os.getenv("DB_USER")
 password=os.getenv("DB_PASSWORD") 
 host=os.getenv("DB_HOST")
 port=os.getenv("DB_PORT")
+
+url_pattern = re.compile(r'https?://\S+')
 
 # Define connection parameters
 db_params = {
@@ -282,3 +286,87 @@ def get_top_posters(guild_id, period="week"):
             top_media = cur.fetchall()
 
     return top_links, top_media
+
+def extract_domain(link):
+    try:
+        parsed = urlparse(link)
+        return parsed.netloc
+    except Exception:
+        return None
+
+def backfill_links_from_history(messages, guild_id):
+    insert_count = 0
+    with conn:
+        with conn.cursor() as cur:
+            for message in messages:
+                if message.author.bot:
+                    continue
+
+                urls = url_pattern.findall(message.content)
+                for url in urls:
+                    parsed = urlparse(url)
+                    domain_name = parsed.netloc
+
+                    cur.execute("""
+                        INSERT INTO link_messages (message_id, user_id, guild_id, channel_id, domain_name, link, reactions, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (message_id) DO NOTHING;
+                    """, (
+                        message.id,
+                        message.author.id,
+                        guild_id,
+                        message.channel.id,
+                        domain_name,
+                        url,
+                        json.dumps({}),  
+                        message.created_at
+                    ))
+                    insert_count += 1
+
+    return insert_count
+def detect_media_type(url):
+    if url.endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        return 'image'
+    elif url.endswith(('.mp4', '.mov', '.webm', '.mkv')):
+        return 'video'
+    elif url.endswith(('.gif',)):
+        return 'gif'
+    else:
+        return None
+
+def backfill_media_from_history(messages, guild_id):
+    insert_count = 0
+    with conn:
+        with conn.cursor() as cur:
+            for message in messages:
+                media_urls = []
+
+                # Check attachments
+                for attachment in message.attachments:
+                    media_type = detect_media_type(attachment.url)
+                    if media_type:
+                        media_urls.append((attachment.url, media_type))
+
+                # Check embedded URLs in the message content
+                urls = re.findall(r'https?://\S+', message.content)
+                for url in urls:
+                    media_type = detect_media_type(url)
+                    if media_type:
+                        media_urls.append((url, media_type))
+
+                # Insert each media found
+                for media_url, media_type in media_urls:
+                    cur.execute("""
+                        INSERT INTO media_messages (message_id, user_id, guild_id, media_url, media_type, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (message_id) DO NOTHING;
+                    """, (
+                        message.id,
+                        message.author.id,
+                        guild_id,
+                        media_url,
+                        media_type,
+                        message.created_at
+                    ))
+                    insert_count += 1
+    return insert_count

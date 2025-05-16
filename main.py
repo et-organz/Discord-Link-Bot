@@ -47,26 +47,19 @@ async def on_message(message):
 
     # Custom help command
     if message.content.startswith('$help'):
-        help_text = """
-Available commands:
-1. !makegif <start_time> <video_url> - Create a GIF from a video
-2. !top_links - View the top links in the server
-3. !top_image - View the top image in the server
-4. !top_video - View the top video in the server
-5. !top_gif - View the top GIF in the server
-6. !top_domain - View the top domain in the server
-        """
+        help_text = """Available commands:
+1. $top_links: returns the top 5 links posted on the server
+2. $top_image: returns the top 5 images posted on the server
+3. $top_video: returns the top 5 videos posted on the server
+4. $top_gif: returns the top 5 gifs posted on the server
+5. $top_domain: returns the top 5 domains posted on the server
+6. $makegif: allows user to make a gif. (NOTE: gif will be 5 seconds long only) Formula: $makegif <start time> <youtube url>
+7. $contest: returns the top posters for either a week or a month of the server
+"""
+
+
         await message.channel.send(help_text)
 
-    if message.content.startswith('$hello'):
-        await message.channel.send('Hello!')
-    if user_reaction_util.url_pattern.search(message.content):
-        await user_reaction_util.url_posted(message)
-    if message.content.startswith(f'$links'):
-        await message.channel.send(await user_reaction_util.get_user_link_count(message.author.id))
-    if message.content.startswith(f'$link'):
-        command_text = message.content[len('$link'):].strip()
-        await message.channel.send( await user_reaction_util.get_other_user_link_count(int(command_text)))
     guild_id = message.guild.id
     converted_url = convert_link(message)
     if converted_url:

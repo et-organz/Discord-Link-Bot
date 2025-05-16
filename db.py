@@ -122,63 +122,45 @@ def get_top_domain(guild_id):
                 LIMIT 1;
             """, (guild_id,))
         return cur.fetchone()
-def add_reaction(emoji,user_id,message_id):
+def add_reaction(emoji, user_id, message_id):
     with conn:
         with conn.cursor() as cur:
-            def update_db(db):
-                cur.execute(f'SELECT reactions FROM {db} WHERE message_id = %s;', (message_id,))
-                result = cur.fetchone()
-                if result is None:
-                    return
-                reactions = result[0] if result and result[0] else {}
+            def update_db(table_name):
+                cur.execute(f"""
+                    UPDATE {table_name}
+                    SET reactions = (
+                        SELECT ARRAY(
+                            SELECT DISTINCT r FROM unnest(reactions || ARRAY[ROW(%s, %s)::reaction_tuple]) AS r
+                        )
+                    ),
+                    reactors = (
+                        SELECT ARRAY(
+                            SELECT DISTINCT r.user_id FROM unnest(reactions || ARRAY[ROW(%s, %s)::reaction_tuple]) AS r
+                        )
+                    )
+                    WHERE message_id = %s;
+                """, (emoji, user_id, emoji, user_id, message_id))
 
-                # Add user ID to the emoji list if not already present
-                if emoji not in reactions:
-                    reactions[emoji] = []
-                if 'reactors' not in reactions:
-                    reactions['reactors'] = {user_id:[emoji]}
-                else:
-                    reactions['reactors'][user_id].append(emoji)
-
-                if user_id not in reactions[emoji]:
-                    reactions[emoji].append(user_id)
-                # Update the DB
-                cur.execute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
-                            (json.dumps(reactions), message_id))
             update_db('link_messages')
             update_db('media_messages')
+
 
 def remove_reaction(emoji, user_id, message_id):
     with conn:
         with conn.cursor() as cur:
-            def update_db(db):
-                cur.execute(f'SELECT reactions FROM {db} WHERE message_id = %s;', (message_id,))
-                result = cur.fetchone()
-                if result is None:
-                    return
-                reactions = result[0] if result and result[0] else {}
-
-                # Remove the user from the emoji's list
-                if emoji in reactions and user_id in reactions[emoji]:
-                    reactions[emoji].remove(user_id)
-                    if not reactions[emoji]:
-                        del reactions[emoji]
-
-                # Remove from 'reactors' if present
-                user_id_str = str(user_id)
-                if 'reactors' in reactions and user_id_str in reactions['reactors']:
-
-                    if emoji in reactions['reactors'][user_id_str]:
-                        reactions['reactors'][user_id_str].remove(emoji)
-                    # Clean up if empty
-                    if len(reactions['reactors'][user_id_str]) == 0:
-                        del reactions['reactors'][user_id_str]
-                    if not reactions['reactors']:
-                        del reactions['reactors']
-
-                # Update the DB
-                cur.execute(f'UPDATE {db} SET reactions = %s WHERE message_id = %s;',\
-                            (json.dumps(reactions), message_id))
+            def update_db(table_name):
+                cur.execute("""
+                    UPDATE {table_name}
+                    SET reactions = ARRAY(
+                        SELECT r FROM unnest(reactions) AS r
+                        WHERE NOT (r.emoji = %s AND r.user_id = %s)
+                    ),
+                    reactors = ARRAY(
+                        SELECT DISTINCT r.user_id FROM unnest(reactions) AS r
+                        WHERE NOT (r.emoji = %s AND r.user_id = %s)
+                    )
+                    WHERE message_id = %s;
+                """.format(table_name=table_name), (emoji, user_id, emoji, user_id, message_id))
 
             update_db('link_messages')
             update_db('media_messages')
@@ -196,26 +178,28 @@ def insert_media(message):
     guild_id = message.guild.id if message.guild else None  # DM check
     link = get_link_from_message(message)
     domain_name = get_url_type(message)
+    # Start with empty reactions array and reactors array
+    reactions = []   # This should be a list of tuples (emoji, user_id)
+    reactors = []    # This should be a list of unique user_ids who reacted
 
-
-    simple_dict = {}
     with conn:
         with conn.cursor() as cur:
 
             if link:
-                result = cur.execute("""
-                    INSERT INTO link_messages  (
-                        message_id, user_id, channel_id, guild_id, domain_name, link, reactions
-                    ) VALUES (%s, %s, %s, %s, %s,%s, %s)
+                cur.execute("""
+                    INSERT INTO link_messages (
+                        message_id, user_id, channel_id, guild_id, link, domain_name, reactions, reactors
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (message_id) DO NOTHING;
                 """, (
                     message_id,
                     user_id,
                     channel_id,
                     guild_id,
-                    domain_name,
                     link,
-                    json.dumps(simple_dict, ensure_ascii=False, indent=2)
+                    domain_name,
+                    reactions,    # pass empty list; psycopg2 converts to array
+                    reactors      # pass empty list for reactors
                 ))
             if message.attachments:
 
@@ -237,20 +221,20 @@ def insert_media(message):
                         break
 
                 if media_type:
-
                     cur.execute("""
-                        INSERT INTO media_messages   (
-                            message_id, user_id, channel_id, guild_id, media_url, media_type, reactions 
-                        ) VALUES (%s, %s, %s, %s, %s,%s, %s)
-                        ON CONFLICT (message_id) DO NOTHING;
-                    """, (
+                            INSERT INTO media_messages (
+                                message_id, user_id, channel_id, guild_id, media_url, media_type, reactions, reactors
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (message_id) DO NOTHING;
+                        """, (
                         message_id,
                         user_id,
                         channel_id,
                         guild_id,
                         media_url,
                         media_type,
-                        json.dumps(simple_dict, ensure_ascii=False, indent=2)
+                        reactions,
+                        reactors
                     ))
 
 def get_top_posters(guild_id, period="week"):

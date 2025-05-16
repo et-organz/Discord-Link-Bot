@@ -324,48 +324,54 @@ def backfill_links_from_history(messages, guild_id):
                     insert_count += 1
 
     return insert_count
+
 def detect_media_type(url):
+    url = str(url)  # Ensure it's a string
     if url.endswith(('.jpg', '.jpeg', '.png', '.webp')):
         return 'image'
     elif url.endswith(('.mp4', '.mov', '.webm', '.mkv')):
         return 'video'
-    elif url.endswith(('.gif',)):
+    elif url.endswith('.gif'):
         return 'gif'
-    else:
-        return None
+    return None
+
 
 def backfill_media_from_history(messages, guild_id):
     insert_count = 0
     with conn:
         with conn.cursor() as cur:
             for message in messages:
-                media_urls = []
+                media_items = []
 
-                # Check attachments
+                # Check for attachments
                 for attachment in message.attachments:
-                    media_type = detect_media_type(attachment.url)
+                    media_type = detect_media_type(attachment.filename)
                     if media_type:
-                        media_urls.append((attachment.url, media_type))
+                        media_items.append((attachment.url, media_type))
 
-                # Check embedded URLs in the message content
-                urls = re.findall(r'https?://\S+', message.content)
-                for url in urls:
-                    media_type = detect_media_type(url)
-                    if media_type:
-                        media_urls.append((url, media_type))
+                # Check embeds
+                for embed in message.embeds:
+                    if hasattr(embed, "url") and embed.url:
+                        media_type = detect_media_type(embed.url)
+                        if media_type:
+                            media_items.append((str(embed.url), media_type))
 
-                # Insert each media found
-                for media_url, media_type in media_urls:
+                # Insert found media items
+                for media_url, media_type in media_items:
                     cur.execute("""
-                        INSERT INTO media_messages (message_id, user_id, guild_id, media_url, media_type, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO media_messages (
+                            message_id, user_id, guild_id, channel_id,
+                            media_type, media_url, reactions, created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (message_id) DO NOTHING;
                     """, (
                         message.id,
                         message.author.id,
                         guild_id,
-                        media_url,
+                        message.channel.id,
                         media_type,
+                        media_url,
+                        json.dumps({}),  # safely serialize empty reactions
                         message.created_at
                     ))
                     insert_count += 1

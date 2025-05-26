@@ -33,10 +33,9 @@ async def on_ready():
                 continue
             messages.append(message)
 
-        link_inserted = db.backfill_links_from_history(messages, channel.guild.id)
-        media_inserted = db.backfill_media_from_history(messages, channel.guild.id)
+        media_inserted = db.backfill_messages_from_history(messages)
 
-        print(f"Inserted {link_inserted} link(s) and {media_inserted} media file(s) into the database.")
+        print(f"Inserted {media_inserted} message(s) into the database.")
         await user_reaction_util.count_links_in_channel(channel)
 
 
@@ -55,8 +54,11 @@ async def on_message(message):
 5. $top_domain: returns the top 5 domains posted on the server
 6. $makegif: allows user to make a gif. (NOTE: gif will be 5 seconds long only) Formula: $makegif <start time> <youtube url>
 7. $contest: returns the top posters for either a week or a month of the server
+8. $top_users <post_type> [limit]: returns the top users based on the number of unique reactions their posts received. 
+   - post_type options: link, image, gif, movie, all
+   - limit is optional (default is 5)
+   Example: $top_users gif 3
 """
-
 
         await message.channel.send(help_text)
 
@@ -104,9 +106,9 @@ async def on_message(message):
         await message.channel.send(response)
 
     elif message.content.startswith('$top_domain'):
-        top_domain = db.get_top_domain(guild_id, 1)
+        top_domain = db.get_top_domain(guild_id)
         if top_domain:
-            domain, count = top_domain[0]
+            domain, count = top_domain
             response = f"**Most Linked Domain:** `{domain}` with {count} links."
         else:
             response = "No domains found."
@@ -140,42 +142,93 @@ async def on_message(message):
                 os.remove("temp_video.mp4")
             if os.path.exists("output.gif"):
                 os.remove("output.gif")
+
     elif message.content.startswith('$contest'):
+
         args = message.content.split()
+
         period = 'week'
+
         if len(args) > 1 and args[1].lower() in ['week', 'month']:
             period = args[1].lower()
 
-        top_links, top_media = db.get_top_posters(message.guild.id, period)
-        print(top_links)
+        # Fetch top posters
+
+        top_links = db.get_top_posters(post_type='link', limit=5, time_range=period)
+
+        top_media = db.get_top_posters(post_type='all', limit=5, time_range=period)  # Combine all media types
 
         embed = discord.Embed(
+
             title=f"🏆 {period.capitalize()}ly Contest Winners!",
+
             description=f"Here are the top posters for the past {period}.",
+
             color=discord.Color.gold()
+
         )
 
         link_str = ""
-        for i, (user_id, count) in enumerate(top_links):
-            user = await client.fetch_user(user_id)
-            link_str += f"{i+1}. {user.name} — {count} links\n"
+
+        for i, entry in enumerate(top_links):
+            user = await client.fetch_user(entry["user_id"])
+
+            link_str += f"{i + 1}. {user.name} — {entry['unique_reactors']} reactions\n"
+
         if not link_str:
             link_str = "No link posters found."
 
         media_str = ""
-        for i, (user_id, count) in enumerate(top_media):
-            user = await client.fetch_user(user_id)
-            media_str += f"{i+1}. {user.name} — {count} media\n"
+
+        for i, entry in enumerate(top_media):
+            user = await client.fetch_user(entry["user_id"])
+
+            media_str += f"{i + 1}. {user.name} — {entry['unique_reactors']} reactions\n"
+
         if not media_str:
             media_str = "No media posters found."
 
         embed.add_field(name="🔗 Top Link Posters", value=link_str, inline=False)
+
         embed.add_field(name="🖼️ Top Media Posters", value=media_str, inline=False)
+
         await message.channel.send(embed=embed)
+
+    elif message.content.startswith('$top_users'):
+        parts = message.content.split()
+
+        if len(parts) >= 2:
+            post_type = parts[1].lower()
+        else:
+            await message.channel.send("❗ Please specify a post type (e.g., link, image, gif, movie, all).")
+            return
+
+        try:
+            limit = int(parts[2]) if len(parts) >= 3 else 5  # Default to 5 if not provided
+        except ValueError:
+            await message.channel.send("❗ Limit must be a number.")
+            return
+
+        try:
+            top_posters = db.get_top_posters(post_type, limit)
+            if not top_posters:
+                await message.channel.send("No results found for that category.")
+                return
+
+            response = f"🏆 Top {limit} {post_type} posters:\n"
+            for i, poster in enumerate(top_posters, 1):
+                response += f"{i}. <@{poster['user_id']}> with {poster['unique_reactors']} unique reactors\n"
+
+            await message.channel.send(response)
+
+        except Exception as e:
+            print(e)
+            await message.channel.send("❗ An error occurred while fetching top posters.")
 
     else:
         db.insert_media(message)
-    
+
+
 
 @client.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):

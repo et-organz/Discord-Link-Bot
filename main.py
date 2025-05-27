@@ -1,11 +1,8 @@
 import discord
 import os
 from dotenv import load_dotenv
-import re
-from link_util import convert_link
-import user_reaction_util
+from link_util import convert_link, count_links_in_channel
 import db
-from discord.ext import commands
 import gif_util 
 load_dotenv()
 
@@ -36,7 +33,7 @@ async def on_ready():
         media_inserted = db.backfill_messages_from_history(messages)
 
         print(f"Inserted {media_inserted} message(s) into the database.")
-        await user_reaction_util.count_links_in_channel(channel)
+        await count_links_in_channel(channel)
 
 
 @client.event
@@ -47,18 +44,27 @@ async def on_message(message):
     # Custom help command
     if message.content.startswith('$help'):
         help_text = """Available commands:
-1. $top_links: returns the top 5 links posted on the server
-2. $top_image: returns the top 5 images posted on the server
-3. $top_video: returns the top 5 videos posted on the server
-4. $top_gif: returns the top 5 gifs posted on the server
-5. $top_domain: returns the top 5 domains posted on the server
-6. $makegif: allows user to make a gif. (NOTE: gif will be 5 seconds long only) Formula: $makegif <start time> <youtube url>
-7. $contest: returns the top posters for either a week or a month of the server
-8. $top_users <post_type> [limit]: returns the top users based on the number of unique reactions their posts received. 
-   - post_type options: link, image, gif, movie, all
-   - limit is optional (default is 5)
-   Example: $top_users gif 3
-"""
+        1. $top_posts <post_type> [limit] [time_range]: Returns the top posts based on reaction count.
+           - post_type options: link, image, gif, movie, all (default: all)
+           - limit (optional): Number of results to return (default: 5)
+           - time_range (optional): week, month, or all (default: all)
+           Example: $top_posts gif 3 week
+        
+        2. $top_users <post_type> [limit] [time_range]: Returns the top users by unique reactors.
+           - post_type options: link, image, gif, movie, all (default: all)
+           - limit (optional): Number of users to list (default: 5)
+           - time_range (optional): week, month, or all (default: all)
+           Example: $top_users link 3 month
+        
+        3. $top_domain: Returns the most frequently linked domain in the server.
+        
+        4. $makegif <start_time> <youtube_url>: Creates a 5-second GIF starting from the specified time in a YouTube video.
+           Example: $makegif 30 https://youtube.com/watch?v=example
+        
+        5. $contest [week|month]: Shows contest results for top posters by links and media based on unique reactors.
+           Example: $contest month
+        """
+
 
         await message.channel.send(help_text)
 
@@ -66,44 +72,114 @@ async def on_message(message):
     converted_url = convert_link(message)
     if converted_url:
         await message.channel.send(converted_url)
-    if message.content.startswith('$top_links'):
-        top_links = db.get_top_links(guild_id, 5)
-        response = "**Top 5 Links:**\n"
-        for val in top_links:
-            link, domain_name, total_reactions, user_id = val
-            user_name = await client.fetch_user(user_id)
-            response += f"- Domain: `{domain_name}`, Reactions: {total_reactions}, Posted by user: {user_name}, Link: {link}\n"
-        await message.channel.send(response)
+    if message.content.startswith('$top_posts'):
+        parts = message.content.split()
 
-    elif message.content.startswith('$top_image'):
-        top_image = db.get_top_media(guild_id, 'image',1)
-        if top_image:
-            media_url, total_reactions, user_id = top_image[0]
-            user_name = await client.fetch_user(user_id)
-            response = f"**Top Image Post:** Reactions: {total_reactions}, Posted by user: {user_name}, Image: {media_url}"
-        else:
-            response = "No top image found."
-        await message.channel.send(response)
+        # Default values
+        post_type = "all"
+        time_range = "all"
+        limit = 5
 
-    elif message.content.startswith('$top_video'):
-        top_video = db.get_top_media(guild_id, 'video', 1)
-        if top_video:
-            media_url, total_reactions, user_id = top_video[0]
-            user_name = await client.fetch_user(user_id)
-            response = f"**Top Video Post:** Reactions: {total_reactions}, Posted by user: {user_name}, Video: {media_url}"
-        else:
-            response = "No top video found."
-        await message.channel.send(response)
+        # Parse user-provided parameters
+        if len(parts) >= 2:
+            post_type = parts[1].lower()
 
-    elif message.content.startswith('$top_gif'):
-        top_gif = db.get_top_media(guild_id, 'gif', 1)
-        if top_gif:
-            media_url, total_reactions, user_id = top_gif[0]
-            user_name = await client.fetch_user(user_id)
-            response = f"**Top GIF Post:** Reactions: {total_reactions}, Posted by user: {user_name}, Gif: {media_url}"
-        else:
-            response = "No top GIF found."
-        await message.channel.send(response)
+        if len(parts) >= 3:
+            if parts[2].isdigit():
+                limit = int(parts[2])
+            else:
+                time_range = parts[2].lower()
+
+        if len(parts) >= 4:
+            if parts[3].isdigit():
+                limit = int(parts[3])
+            else:
+                await message.channel.send("❗ Limit must be a number.")
+                return
+
+        try:
+            top_posts = db.get_top_posts(guild_id, post_type=post_type, time_range=time_range, limit=limit)
+
+            if not top_posts:
+                await message.channel.send("No posts found for that query.")
+                return
+
+            title_map = {
+                "link": "Links",
+                "image": "Images",
+                "movie": "Videos",
+                "gif": "GIFs",
+                "all": "Posts"
+            }
+
+            title = title_map.get(post_type, "Posts")
+            response = f"**Top {limit} {title} ({time_range})**\n"
+
+            for item in top_posts:
+                user_name = await client.fetch_user(item["user_id"])
+                domain = f"Domain: `{item['domain_name']}`, " if "domain_name" in item else ""
+                response += (
+                    f"- {domain}Reactions: {item['reaction_count']}, "
+                    f"Posted by user: {user_name}, Content: {item['content']}\n"
+                )
+
+            await message.channel.send(response)
+
+        except Exception as e:
+            print(e)
+            await message.channel.send("❗ An error occurred while fetching top posts.")
+
+    elif message.content.startswith('$top_users'):
+
+        parts = message.content.split()
+
+        # Set default values
+
+        post_type = "all"
+
+        limit = 5
+
+        time_range = "all"  # Optional: extend support for week/month
+
+        # Parse arguments with safe defaults
+
+        if len(parts) >= 2:
+            post_type = parts[1].lower()
+
+        if len(parts) >= 3:
+
+            if parts[2].isdigit():
+
+                limit = int(parts[2])
+
+            else:
+
+                print("Invalid limit provided, defaulting to 5")
+
+        if len(parts) >= 4:
+            time_range = parts[3].lower()
+
+        try:
+
+            top_posters = db.get_top_posters(post_type, limit, time_range)
+
+            if not top_posters:
+                await message.channel.send("No results found for that category.")
+
+                return
+
+            response = f"🏆 Top {limit} {post_type} posters ({time_range}):\n"
+
+            for i, poster in enumerate(top_posters, 1):
+                response += f"{i}. <@{poster['user_id']}> with {poster['unique_reactors']} unique reactors\n"
+
+            await message.channel.send(response)
+
+        except Exception as e:
+
+            print(e)
+
+            await message.channel.send("❗ An error occurred while fetching top posters.")
 
     elif message.content.startswith('$top_domain'):
         top_domain = db.get_top_domain(guild_id)
@@ -193,37 +269,6 @@ async def on_message(message):
         embed.add_field(name="🖼️ Top Media Posters", value=media_str, inline=False)
 
         await message.channel.send(embed=embed)
-
-    elif message.content.startswith('$top_users'):
-        parts = message.content.split()
-
-        if len(parts) >= 2:
-            post_type = parts[1].lower()
-        else:
-            await message.channel.send("❗ Please specify a post type (e.g., link, image, gif, movie, all).")
-            return
-
-        try:
-            limit = int(parts[2]) if len(parts) >= 3 else 5  # Default to 5 if not provided
-        except ValueError:
-            await message.channel.send("❗ Limit must be a number.")
-            return
-
-        try:
-            top_posters = db.get_top_posters(post_type, limit)
-            if not top_posters:
-                await message.channel.send("No results found for that category.")
-                return
-
-            response = f"🏆 Top {limit} {post_type} posters:\n"
-            for i, poster in enumerate(top_posters, 1):
-                response += f"{i}. <@{poster['user_id']}> with {poster['unique_reactors']} unique reactors\n"
-
-            await message.channel.send(response)
-
-        except Exception as e:
-            print(e)
-            await message.channel.send("❗ An error occurred while fetching top posters.")
 
     else:
         db.insert_media(message)

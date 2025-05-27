@@ -3,7 +3,14 @@ from moviepy import VideoFileClip
 import yt_dlp
 
 def download_video(url, save_path):
-    """Download the video file from a URL using yt-dlp."""
+    """
+    Download the video file from a URL using yt-dlp.
+
+    Parameters:
+    - url (str): The URL of the video to download.
+    - save_path (str): The file path to save the downloaded video.
+
+    """
     ydl_opts = {
         'format': 'best',  # Best available quality
         'outtmpl': save_path,  # Save path for the downloaded video
@@ -15,7 +22,16 @@ def download_video(url, save_path):
 
 
 def video_to_gif(input_path, output_path, start_time, duration=5, fps=10):
-    """Convert part of a video file to a GIF."""
+    """
+    Convert part of a video file to a GIF.
+
+    Parameters:
+    - input_path (str): Path to the input video file.
+    - output_path (str): Path where the output GIF will be saved.
+    - start_time (float): Start time in seconds for the GIF.
+    - duration (int, optional): Duration in seconds for the GIF. Defaults to 5.
+    - fps (int, optional): Frames per second of the output GIF. Defaults to 10.
+    """
     clip = VideoFileClip(input_path)
     
     # Ensure start_time + duration doesn't exceed video duration

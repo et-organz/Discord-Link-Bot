@@ -1,4 +1,6 @@
 import re
+from collections import defaultdict
+
 INSTAGRAM_REGEX = r"(https?://)?(www\.)?instagram\.com/[A-Za-z0-9_.]+/?"
 TWITTER_REGEX = r"(https?://)?(www\.)?(twitter|x)\.com/[A-Za-z0-9_]+/status/\d+"
 TIKTOK_REGEX = r"(https?://)?(www\.)?tiktok\.com/(t/[\w\d]+|@[\w\d_.]+/video/\d+)"
@@ -7,8 +9,23 @@ FACEBOOK_REGEX = r"(https?://)?(www\.)?facebook\.com/reel/[\w\d./?=&-]+"
 YOUTUBE_REGEX = r"(?:https?://)?(?:www\.)?(?:youtube\.com/(?:watch\?v=|embed/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{11})"
 # Regex pattern for extracting domain
 domain_pattern = r'(?:https?://)?(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})'
-
+url_pattern = re.compile(r'https?://[^\s]+')
 link_pattern = r'https?://[^\s]+'  # Matches http/https URLs
+
+# Dictionary to store how many times a user has posted a link
+user_link_count = defaultdict(int)
+web_link_count = defaultdict(int)
+async def url_posted(message):
+    match = re.search(domain_pattern, message.content)
+    if match:
+        domain = match.group(1)
+        web_link_count[domain] += 1
+
+    user_link_count[message.author.id] += 1
+async def count_links_in_channel(channel):
+    async for message in channel.history(limit=100):  # Adjust limit as needed
+        if url_pattern.search(message.content):
+            await url_posted(message)
 def get_link_from_message(message):
     match = re.search(link_pattern, message.content)
     if match:

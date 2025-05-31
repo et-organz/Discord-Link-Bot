@@ -1,319 +1,226 @@
 import discord
+from discord.ext import commands
+from discord import app_commands
 import os
 from dotenv import load_dotenv
-from link_util import convert_link, count_links_in_channel
 import db
-import gif_util 
-load_dotenv()
+import gif_util
+from link_util import convert_link, count_links_in_channel
 
-api_key = os.getenv("API_KEY")
+load_dotenv()
+API_KEY = os.getenv("API_KEY")
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.messages = True     # To recieve message events
-intents.reactions = True    # To recieve reaction events
+intents.messages = True
+intents.reactions = True
 
-client = discord.Client(intents=intents)
+class MyClient(discord.Client):
+    def __init__(self):
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        for guild in self.guilds:
+            self.tree.copy_global_to(guild=guild)
+        await self.tree.sync()
+
+client = MyClient()
 
 @client.event
 async def on_ready():
-    print(f'We have logged in as {client.user}')
+    print(f'✅ Logged in as {client.user}')
+
+# Moderator check
+def is_moderator(interaction: discord.Interaction) -> bool:
+    return interaction.user.guild_permissions.manage_messages or interaction.user.guild_permissions.administrator
+
+@client.tree.command(name="backfill", description="Backfill all messages in text channels.")
+async def backfill_command(interaction: discord.Interaction):
+    if not is_moderator(interaction):
+        await interaction.response.send_message("❌ You need moderator permissions to run this command.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("Starting backfill... This may take a while.")
+    for channel in interaction.guild.text_channels:
+        try:
+            messages = [m async for m in channel.history(limit=None, oldest_first=True) if not m.author.bot]
+            count = db.backfill_messages_from_history(messages)
+            await count_links_in_channel(channel)
+            print(f"✅ Inserted {count} messages from #{channel.name}")
+        except discord.Forbidden:
+            print(f"🚫 No access to #{channel.name}")
+        except Exception as e:
+            print(f"❗ Error in {channel.name}: {e}")
+    await interaction.followup.send("✅ Backfill complete!")
+
+@client.tree.command(name="top_posts", description="Get top posts based on reaction count.")
+@app_commands.describe(post_type="Type of post", limit="Number of posts", time_range="Time filter (week/month/all)")
+async def top_posts(interaction: discord.Interaction, post_type: str = "all", limit: int = 5, time_range: str = "all"):
+    try:
+        posts = db.get_top_posts(interaction.guild_id, post_type, time_range, limit)
+        if not posts:
+            await interaction.response.send_message("No posts found.")
+            return
+
+        title_map = {
+            "link": "Links", "image": "Images", "movie": "Videos", "gif": "GIFs", "all": "Posts"
+        }
+        lines = [f"**Top {limit} {title_map.get(post_type, 'Posts')} ({time_range})**"]
+        for item in posts:
+            user = await client.fetch_user(item["user_id"])
+            domain = f"Domain: `{item['domain_name']}`, " if "domain_name" in item else ""
+            lines.append(f"- {domain}Reactions: {item['reaction_count']}, by {user.mention}, Content: {item['content']}")
+
+        await interaction.response.send_message("\n".join(lines))
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❗ Error fetching top posts.")
+
+@client.tree.command(name="top_users", description="Get top users based on unique reactors.")
+@app_commands.describe(post_type="Type of post", limit="Number of users", time_range="Time filter (week/month/all)")
+async def top_users(interaction: discord.Interaction, post_type: str = "all", limit: int = 5, time_range: str = "all"):
+    try:
+        posters = db.get_top_posters(post_type, limit, time_range)
+        if not posters:
+            await interaction.response.send_message("No results found.")
+            return
+
+        lines = [f"🏆 Top {limit} {post_type} posters ({time_range}):"]
+        for i, entry in enumerate(posters, 1):
+            lines.append(f"{i}. <@{entry['user_id']}> with {entry['unique_reactors']} unique reactors")
+
+        await interaction.response.send_message("\n".join(lines))
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❗ Error fetching top users.")
+
+@client.tree.command(name="top_domain", description="Show the most linked domain in the server.")
+async def top_domain(interaction: discord.Interaction):
+    try:
+        domain_data = db.get_top_domain(interaction.guild_id)
+        if domain_data:
+            domain, count = domain_data
+            await interaction.response.send_message(f"**Most Linked Domain:** `{domain}` with {count} links.")
+        else:
+            await interaction.response.send_message("No domains found.")
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❗ Error fetching domain.")
+
+@client.tree.command(name="makegif", description="Create a GIF from a YouTube video.")
+@app_commands.describe(start_time="Start time in seconds", video_url="YouTube video URL")
+async def makegif(interaction: discord.Interaction, start_time: float, video_url: str):
+    await interaction.response.send_message("Downloading and processing your video... 🎬")
+    try:
+        gif_util.download_video(video_url, "temp_video.mp4")
+        gif_util.video_to_gif("temp_video.mp4", "output.gif", start_time=start_time)
+        await interaction.followup.send(file=discord.File("output.gif"))
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {e}")
+        import traceback; traceback.print_exc()
+    finally:
+        if os.path.exists("temp_video.mp4"): os.remove("temp_video.mp4")
+        if os.path.exists("output.gif"): os.remove("output.gif")
+
+@client.tree.command(name="contest", description="Show contest results for top link/media posters.")
+@app_commands.describe(period="Choose week or month")
+async def contest(interaction: discord.Interaction, period: str = "week"):
+    if period not in ["week", "month"]:
+        await interaction.response.send_message("Invalid period. Use 'week' or 'month'.")
+        return
+    try:
+        top_links = db.get_top_posters("link", 5, period)
+        top_media = db.get_top_posters("all", 5, period)
+
+        embed = discord.Embed(
+            title=f"🏆 {period.capitalize()}ly Contest Winners!",
+            description=f"Top posters for the past {period}:",
+            color=discord.Color.gold()
+        )
+
+        def format_entries(entries):
+            return "\n".join(f"{i+1}. <@{e['user_id']}> — {e['unique_reactors']} reactions" for i, e in enumerate(entries)) or "No results."
+
+        embed.add_field(name="🔗 Top Link Posters", value=format_entries(top_links), inline=False)
+        embed.add_field(name="🖼️ Top Media Posters", value=format_entries(top_media), inline=False)
+
+        await interaction.response.send_message(embed=embed)
+    except Exception as e:
+        print(e)
+        await interaction.response.send_message("❗ Error fetching contest data.")
+
+@client.tree.command(name="help", description="Shows all available bot commands.")
+async def help_command(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📖 Bot Help Menu",
+        description="Here’s a list of all available commands:",
+        color=discord.Color.blurple()
+    )
+
+    # Public command
+    embed.add_field(
+        name="/makegif <start_time> <youtube_url>",
+        value="🎬 Creates a 5-second GIF starting from the specified time in a YouTube video.",
+        inline=False
+    )
+
+    # Mod-only commands
+    embed.add_field(
+        name="/top_posts <post_type> [limit] [time_range]",
+        value="🔝 Shows top posts by reaction count.\n"
+              "• post_type: link, image, gif, movie, all\n"
+              "• time_range: week, month, all (default: all)\n"
+              "🔒 **Mod-only**",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/top_users <post_type> [limit] [time_range]",
+        value="👥 Shows top users by unique reactors.\n"
+              "• post_type: link, image, gif, movie, all\n"
+              "• time_range: week, month, all (default: all)\n"
+              "🔒 **Mod-only**",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/top_domain",
+        value="🌐 Shows the most frequently linked domain.\n🔒 **Mod-only**",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/contest [week|month]",
+        value="🏆 Shows contest results for top link and media posters based on unique reactions.\n🔒 **Mod-only**",
+        inline=False
+    )
+
+    embed.add_field(
+        name="/backfill",
+        value="📥 Manually trigger backfilling of messages in all text channels.\n🔒 **Mod-only**",
+        inline=False
+    )
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@client.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    if payload.user_id != client.user.id:
+        db.add_reaction(str(payload.emoji), payload.user_id, payload.message_id)
+
+@client.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    if payload.user_id != client.user.id:
+        db.remove_reaction(str(payload.emoji), payload.user_id, payload.message_id)
 
 @client.event
 async def on_message(message):
     if message.author == client.user:
         return
-
-    # Custom help command
-    if message.content.startswith('$help'):
-        help_text = """Available commands:
-        1. $top_posts <post_type> [limit] [time_range]: Returns the top posts based on reaction count.
-           - post_type options: link, image, gif, movie, all (default: all)
-           - limit (optional): Number of results to return (default: 5)
-           - time_range (optional): week, month, or all (default: all)
-           Example: $top_posts gif 3 week
-        
-        2. $top_users <post_type> [limit] [time_range]: Returns the top users by unique reactors.
-           - post_type options: link, image, gif, movie, all (default: all)
-           - limit (optional): Number of users to list (default: 5)
-           - time_range (optional): week, month, or all (default: all)
-           Example: $top_users link 3 month
-        
-        3. $top_domain: Returns the most frequently linked domain in the server.
-        
-        4. $makegif <start_time> <youtube_url>: Creates a 5-second GIF starting from the specified time in a YouTube video.
-           Example: $makegif 30 https://youtube.com/watch?v=example
-        
-        5. $contest [week|month]: Shows contest results for top posters by links and media based on unique reactors.
-           Example: $contest month
-        """
-
-
-        await message.channel.send(help_text)
-
-    guild_id = message.guild.id
-    converted_url = convert_link(message)
-    if converted_url:
-        await message.channel.send(converted_url)
-    if message.content.startswith('$top_posts'):
-        parts = message.content.split()
-
-        # Default values
-        post_type = "all"
-        time_range = "all"
-        limit = 5
-
-        # Parse user-provided parameters
-        if len(parts) >= 2:
-            post_type = parts[1].lower()
-
-        if len(parts) >= 3:
-            if parts[2].isdigit():
-                limit = int(parts[2])
-            else:
-                time_range = parts[2].lower()
-
-        if len(parts) >= 4:
-            if parts[3].isdigit():
-                limit = int(parts[3])
-            else:
-                await message.channel.send("❗ Limit must be a number.")
-                return
-
-        try:
-            top_posts = db.get_top_posts(guild_id, post_type=post_type, time_range=time_range, limit=limit)
-
-            if not top_posts:
-                await message.channel.send("No posts found for that query.")
-                return
-
-            title_map = {
-                "link": "Links",
-                "image": "Images",
-                "movie": "Videos",
-                "gif": "GIFs",
-                "all": "Posts"
-            }
-
-            title = title_map.get(post_type, "Posts")
-            response = f"**Top {limit} {title} ({time_range})**\n"
-
-            for item in top_posts:
-                user_name = await client.fetch_user(item["user_id"])
-                domain = f"Domain: `{item['domain_name']}`, " if "domain_name" in item else ""
-                response += (
-                    f"- {domain}Reactions: {item['reaction_count']}, "
-                    f"Posted by user: {user_name}, Content: {item['content']}\n"
-                )
-
-            await message.channel.send(response)
-
-        except Exception as e:
-            print(e)
-            await message.channel.send("❗ An error occurred while fetching top posts.")
-
-    elif message.content.startswith('$top_users'):
-
-        parts = message.content.split()
-
-        # Set default values
-
-        post_type = "all"
-
-        limit = 5
-
-        time_range = "all"  # Optional: extend support for week/month
-
-        # Parse arguments with safe defaults
-
-        if len(parts) >= 2:
-            post_type = parts[1].lower()
-
-        if len(parts) >= 3:
-
-            if parts[2].isdigit():
-
-                limit = int(parts[2])
-
-            else:
-
-                print("Invalid limit provided, defaulting to 5")
-
-        if len(parts) >= 4:
-            time_range = parts[3].lower()
-
-        try:
-
-            top_posters = db.get_top_posters(post_type, limit, time_range)
-
-            if not top_posters:
-                await message.channel.send("No results found for that category.")
-
-                return
-
-            response = f"🏆 Top {limit} {post_type} posters ({time_range}):\n"
-
-            for i, poster in enumerate(top_posters, 1):
-                response += f"{i}. <@{poster['user_id']}> with {poster['unique_reactors']} unique reactors\n"
-
-            await message.channel.send(response)
-
-        except Exception as e:
-
-            print(e)
-
-            await message.channel.send("❗ An error occurred while fetching top posters.")
-
-    elif message.content.startswith('$top_domain'):
-        top_domain = db.get_top_domain(guild_id)
-        if top_domain:
-            domain, count = top_domain
-            response = f"**Most Linked Domain:** `{domain}` with {count} links."
-        else:
-            response = "No domains found."
-        await message.channel.send(response)
-
-    elif message.content.startswith('$makegif'):
-        try:
-            parts = message.content.split()
-            if len(parts) < 3:
-                await message.channel.send("Usage: `!makegif <start_time> <video_url>`")
-                return
-
-            start_time = float(parts[1])
-            video_url = parts[2]
-
-            await message.channel.send("Downloading and processing your video... 🎬")
-
-            input_video_path = "temp_video.mp4"
-            output_gif_path = "output.gif"
-
-            gif_util.download_video(video_url, input_video_path)
-            gif_util.video_to_gif(input_video_path, output_gif_path, start_time=start_time)
-            await message.channel.send(file=discord.File(output_gif_path))
-
-        except Exception as e:
-            await message.channel.send(f"An error occurred: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            if os.path.exists("temp_video.mp4"):
-                os.remove("temp_video.mp4")
-            if os.path.exists("output.gif"):
-                os.remove("output.gif")
-
-    elif message.content.startswith('$contest'):
-
-        args = message.content.split()
-
-        period = 'week'
-
-        if len(args) > 1 and args[1].lower() in ['week', 'month']:
-            period = args[1].lower()
-
-        # Fetch top posters
-
-        top_links = db.get_top_posters(post_type='link', limit=5, time_range=period)
-
-        top_media = db.get_top_posters(post_type='all', limit=5, time_range=period)  # Combine all media types
-
-        embed = discord.Embed(
-
-            title=f"🏆 {period.capitalize()}ly Contest Winners!",
-
-            description=f"Here are the top posters for the past {period}.",
-
-            color=discord.Color.gold()
-
-        )
-
-        link_str = ""
-
-        for i, entry in enumerate(top_links):
-            user = await client.fetch_user(entry["user_id"])
-
-            link_str += f"{i + 1}. {user.name} — {entry['unique_reactors']} reactions\n"
-
-        if not link_str:
-            link_str = "No link posters found."
-
-        media_str = ""
-
-        for i, entry in enumerate(top_media):
-            user = await client.fetch_user(entry["user_id"])
-
-            media_str += f"{i + 1}. {user.name} — {entry['unique_reactors']} reactions\n"
-
-        if not media_str:
-            media_str = "No media posters found."
-
-        embed.add_field(name="🔗 Top Link Posters", value=link_str, inline=False)
-
-        embed.add_field(name="🖼️ Top Media Posters", value=media_str, inline=False)
-
-        await message.channel.send(embed=embed)
-
-    elif message.content.startswith('$backfill'):
-        if not message.author.guild_permissions.administrator:
-            await message.channel.send("❗ You need administrator permissions to run this command.")
-            return
-
-        await message.channel.send("📥 Starting backfill of message history...")
-
-        try:
-            for channel in message.guild.text_channels:
-                try:
-                    await message.channel.send(f"Backfilling #{channel.name}...")
-                    messages = []
-                    async for msg in channel.history(limit=None, oldest_first=True):
-                        if msg.author.bot:
-                            continue
-                        messages.append(msg)
-
-                    inserted = db.backfill_messages_from_history(messages)
-                    await message.channel.send(f"✅ Inserted {inserted} message(s) from #{channel.name}")
-                    await count_links_in_channel(channel)
-
-                except discord.Forbidden:
-                    await message.channel.send(f"🚫 Missing permission to access #{channel.name}")
-                except discord.HTTPException as e:
-                    await message.channel.send(f"❗ HTTP error in #{channel.name}: {e}")
-                except Exception as e:
-                    await message.channel.send(f"❗ Unexpected error in #{channel.name}: {e}")
-
-        except Exception as e:
-            await message.channel.send(f"❗ An error occurred during backfilling: {e}")
-
-
-    else:
-        db.insert_media(message)
-
-
-
-@client.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    emoji = str(payload.emoji)
-    user_id = payload.user_id
-    message_id = payload.message_id
-    print(f'{user_id} raw reacted with {emoji} with messageid{message_id}')
-    # Ignore the bot itself
-    if user_id == client.user.id:
-        return
-
-    db.add_reaction(emoji, user_id, message_id)
-
-@client.event
-async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    emoji = str(payload.emoji)
-    user_id = payload.user_id
-    message_id = payload.message_id
-
-    if user_id == client.user.id:
-        return
-    print(f"Reaction removed: {emoji} by user {user_id} on message {message_id}")
-    db.remove_reaction(emoji, user_id, message_id)
-
-
-
-
-client.run(api_key)
+    converted = convert_link(message)
+    if converted:
+        await message.channel.send(converted)
+    db.insert_media(message)
+
+client.run(API_KEY)

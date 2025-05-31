@@ -1,3 +1,0 @@
-1. Make it so that backfilling the data is a command
-2. Look into refactoring the code so it works on commands and doesn't necessarity look at everything posted
-3. Create a better README

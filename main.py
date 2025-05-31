@@ -15,26 +15,9 @@ intents.reactions = True    # To recieve reaction events
 
 client = discord.Client(intents=intents)
 
-# Define the channel ID where you want to count the links
-TARGET_CHANNEL_ID = 1347815817080999969
-
 @client.event
 async def on_ready():
     print(f'We have logged in as {client.user}')
-    channel = client.get_channel(TARGET_CHANNEL_ID)
-    if channel:
-        print("Backfilling link and media history...")
-        messages = []
-        async for message in channel.history(limit=None, oldest_first=True):
-            if message.author.bot:
-                continue
-            messages.append(message)
-
-        media_inserted = db.backfill_messages_from_history(messages)
-
-        print(f"Inserted {media_inserted} message(s) into the database.")
-        await count_links_in_channel(channel)
-
 
 @client.event
 async def on_message(message):
@@ -269,6 +252,38 @@ async def on_message(message):
         embed.add_field(name="🖼️ Top Media Posters", value=media_str, inline=False)
 
         await message.channel.send(embed=embed)
+
+    elif message.content.startswith('$backfill'):
+        if not message.author.guild_permissions.administrator:
+            await message.channel.send("❗ You need administrator permissions to run this command.")
+            return
+
+        await message.channel.send("📥 Starting backfill of message history...")
+
+        try:
+            for channel in message.guild.text_channels:
+                try:
+                    await message.channel.send(f"Backfilling #{channel.name}...")
+                    messages = []
+                    async for msg in channel.history(limit=None, oldest_first=True):
+                        if msg.author.bot:
+                            continue
+                        messages.append(msg)
+
+                    inserted = db.backfill_messages_from_history(messages)
+                    await message.channel.send(f"✅ Inserted {inserted} message(s) from #{channel.name}")
+                    await count_links_in_channel(channel)
+
+                except discord.Forbidden:
+                    await message.channel.send(f"🚫 Missing permission to access #{channel.name}")
+                except discord.HTTPException as e:
+                    await message.channel.send(f"❗ HTTP error in #{channel.name}: {e}")
+                except Exception as e:
+                    await message.channel.send(f"❗ Unexpected error in #{channel.name}: {e}")
+
+        except Exception as e:
+            await message.channel.send(f"❗ An error occurred during backfilling: {e}")
+
 
     else:
         db.insert_media(message)

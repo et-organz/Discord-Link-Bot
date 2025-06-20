@@ -6,7 +6,16 @@ from dotenv import load_dotenv
 import db
 import gif_util
 from link_util import convert_link, count_links_in_channel
+import asyncio
+from datetime import datetime
 
+STATUS_FILE = "last_alive.txt"
+
+async def periodic_status_writer():
+    while True:
+        with open(STATUS_FILE, "w") as f:
+            f.write(datetime.utcnow().isoformat())
+        await asyncio.sleep(60)  # write every 60 seconds
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 
@@ -30,6 +39,21 @@ client = MyClient()
 @client.event
 async def on_ready():
     print(f'✅ Logged in as {client.user}')
+    client.loop.create_task(periodic_status_writer())
+
+    # Check for unclean shutdown:
+    try:
+        with open(STATUS_FILE, "r") as f:
+            last_alive_str = f.read().strip()
+            last_alive = datetime.fromisoformat(last_alive_str)
+            time_since = datetime.utcnow() - last_alive
+            if time_since.total_seconds() > 90:
+                print("🛠️ Bot was offline for too long. Backlogging messages...")
+                # await run_backlog_process(last_alive) # Note to elijiah add backlogging here
+            else:
+                print("✅ Clean or recent restart detected.")
+    except FileNotFoundError:
+        print("No previous status file found. Assuming first launch.")
 
 # Moderator check
 def is_moderator(interaction: discord.Interaction) -> bool:

@@ -7,7 +7,7 @@ import db
 import gif_util
 from link_util import convert_link, count_links_in_channel
 import asyncio
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 STATUS_FILE = "last_alive.txt"
@@ -15,7 +15,8 @@ STATUS_FILE = "last_alive.txt"
 async def periodic_status_writer():
     while True:
         with open(STATUS_FILE, "w") as f:
-            f.write(datetime.utcnow().isoformat())
+            # Use timezone-aware UTC timestamp
+            f.write(datetime.now(timezone.utc).isoformat())
         await asyncio.sleep(60)  # write every 60 seconds
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
@@ -47,15 +48,22 @@ async def on_ready():
         with open(STATUS_FILE, "r") as f:
             last_alive_str = f.read().strip()
             last_alive = datetime.fromisoformat(last_alive_str)
-            time_since = datetime.utcnow() - last_alive
+
+            # Ensure datetime is timezone-aware (assume UTC if not)
+            if last_alive.tzinfo is None:
+                last_alive = last_alive.replace(tzinfo=timezone.utc)
+
+            time_since = datetime.now(timezone.utc) - last_alive
+
             if time_since.total_seconds() > 90:
                 print("🛠️ Bot was offline for too long. Backlogging messages...")
-                # await run_backlog_process(last_alive) # Note to elijiah add backlogging here
+                # await run_backlog_process(last_alive)  # Add backlogging here
             else:
                 print("✅ Clean or recent restart detected.")
     except FileNotFoundError:
-        print("No previous status file found. Assuming first launch.")
-
+        print("📂 No previous status file found. Assuming first launch.")
+    except ValueError as e:
+        print(f"⚠️ Failed to parse timestamp from status file: {e}")
 # Moderator check
 def is_moderator(interaction: discord.Interaction) -> bool:
     return interaction.user.guild_permissions.manage_messages or interaction.user.guild_permissions.administrator

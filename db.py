@@ -61,7 +61,7 @@ def get_top_posts(guild_id: int, post_type: str = "all", limit: int | str = 5, t
     # Normalize limit
     if isinstance(limit, str):
         if limit.lower() == "all":
-            limit = 10  # or another large number
+            limit = 5
         else:
             raise ValueError("`limit` must be an integer or the string 'all'")
     elif not isinstance(limit, int):

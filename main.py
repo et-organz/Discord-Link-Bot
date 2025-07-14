@@ -7,7 +7,8 @@ import db
 import gif_util
 from link_util import convert_link, count_links_in_channel
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, UTC
+from typing import Optional
 
 STATUS_FILE = "last_alive.txt"
 
@@ -59,24 +60,38 @@ async def on_ready():
 def is_moderator(interaction: discord.Interaction) -> bool:
     return interaction.user.guild_permissions.manage_messages or interaction.user.guild_permissions.administrator
 
-@client.tree.command(name="backfill", description="Backfill all messages in text channels.")
-async def backfill_command(interaction: discord.Interaction):
+@client.tree.command(name="backfill", description="Backfill messages within a time range (in days, or all if not specified).")
+@app_commands.describe(days="Number of days back to fetch messages (e.g. 30). Leave blank for all messages.")
+async def backfill_command(interaction: discord.Interaction, days: Optional[int] = None):
     if not is_moderator(interaction):
         await interaction.response.send_message("❌ You need moderator permissions to run this command.", ephemeral=True)
         return
 
-    await interaction.response.send_message("Starting backfill... This may take a while.")
+    if days is None:
+        await interaction.response.send_message("Starting full backfill... This may take a while.")
+    else:
+        await interaction.response.send_message(f"Starting backfill for the last {days} days... This may take a while.")
+
+    total_inserted = 0
+
     for channel in interaction.guild.text_channels:
         try:
-            messages = [m async for m in channel.history(limit=None, oldest_first=True) if not m.author.bot]
+            kwargs = {"limit": None, "oldest_first": True}
+            if days is not None:
+                cutoff_time = datetime.now(UTC) - timedelta(days=days)
+                kwargs["after"] = cutoff_time
+
+            messages = [m async for m in channel.history(**kwargs) if not m.author.bot]
             count = db.backfill_messages_from_history(messages)
             await count_links_in_channel(channel)
+            total_inserted += count
             print(f"✅ Inserted {count} messages from #{channel.name}")
         except discord.Forbidden:
             print(f"🚫 No access to #{channel.name}")
         except Exception as e:
             print(f"❗ Error in {channel.name}: {e}")
-    await interaction.followup.send("✅ Backfill complete!")
+
+    await interaction.followup.send(f"✅ Backfill complete! Inserted {total_inserted} messages.")
 
 @client.tree.command(name="top_posts", description="Get top posts based on reaction count.")
 @app_commands.describe(post_type="Type of post", limit="Number of posts", time_range="Time filter (week/month/all)")

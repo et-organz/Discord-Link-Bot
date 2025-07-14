@@ -50,106 +50,114 @@ except Exception as e:
 conn = psycopg2.connect(**db_params)
 
 
-def get_top_posts(guild_id: int, post_type: str = "all", limit: int = 5, time_range: str = "all"):
-    """
-    Retrieves the top posts by reaction count for a given guild.
+from datetime import datetime, timedelta
 
-    Parameters:
-    - guild_id (int): ID of the guild to filter messages.
-    - post_type (str): Type of post to retrieve ("image", "gif", "movie", "link", or "all"). Defaults to "all".
-    - limit (int): Maximum number of posts to return. Defaults to 5.
-    - time_range (str): Time period to consider ("week", "month", or "all"). Defaults to "all".
-
-    Returns:
-    - List[dict]: List of dictionaries containing post data including content, user_id, domain_name (if applicable), and reaction_count.
+def get_top_posts(guild_id: int, post_type: str = "all", limit: int | str = 5, time_range: str = "all"):
     """
+    Retrieves top posts based on reaction count within a guild, filtered by type and time.
+    Returns list of dicts with user_id, reaction_count, domain_name (or None), and content (media_url or link).
+    """
+
+    # Normalize limit
+    if isinstance(limit, str):
+        if limit.lower() == "all":
+            limit = 10  # or another large number
+        else:
+            raise ValueError("`limit` must be an integer or the string 'all'")
+    elif not isinstance(limit, int):
+        raise ValueError("`limit` must be an integer or the string 'all'")
+
+    # Date filtering
+    date_filter = ""
+    date_params = []
+    if time_range == "week":
+        start_date = datetime.utcnow() - timedelta(days=7)
+        date_filter = "AND created_at >= %s"
+        date_params = [start_date]
+    elif time_range == "month":
+        start_date = datetime.utcnow() - timedelta(days=30)
+        date_filter = "AND created_at >= %s"
+        date_params = [start_date]
+
+    queries = []
+    param_sets = []
+
+    if post_type.lower() in ["image", "gif", "movie"]:
+        queries.append(f"""
+            SELECT user_id, array_length(reactors, 1) AS reaction_count, NULL AS domain_name, media_url AS content
+            FROM media_messages
+            WHERE guild_id = %s AND media_type = %s {date_filter}
+            ORDER BY reaction_count DESC NULLS LAST
+            LIMIT %s
+        """)
+        param_sets.append([guild_id, post_type] + date_params + [limit])
+
+    elif post_type.lower() == "link":
+        queries.append(f"""
+            SELECT user_id, array_length(reactors, 1) AS reaction_count, domain_name, link AS content
+            FROM link_messages
+            WHERE guild_id = %s {date_filter}
+            ORDER BY reaction_count DESC NULLS LAST
+            LIMIT %s
+        """)
+        param_sets.append([guild_id] + date_params + [limit])
+
+    elif post_type.lower() == "all":
+        queries.append(f"""
+            SELECT user_id, array_length(reactors, 1) AS reaction_count, NULL AS domain_name, media_url AS content
+            FROM media_messages
+            WHERE guild_id = %s {date_filter}
+        """)
+        param_sets.append([guild_id] + date_params)
+
+        queries.append(f"""
+            SELECT user_id, array_length(reactors, 1) AS reaction_count, domain_name, link AS content
+            FROM link_messages
+            WHERE guild_id = %s {date_filter}
+        """)
+        param_sets.append([guild_id] + date_params)
+
+        union_query = " UNION ALL ".join(queries)
+        final_query = f"""
+            SELECT * FROM ({union_query}) AS combined
+            ORDER BY reaction_count DESC NULLS LAST
+            LIMIT %s
+        """
+        all_params = [param for param_set in param_sets for param in param_set] + [limit]
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(final_query, all_params)
+                results = cur.fetchall()
+                return [
+                    {
+                        "user_id": row[0],
+                        "reaction_count": row[1] or 0,
+                        "domain_name": row[2],
+                        "content": row[3]
+                    } for row in results
+                ]
+
+    else:
+        raise ValueError(f"Invalid post_type: {post_type}")
+
+    # Single query case (image/gif/movie or link)
+    final_query = queries[0]
+    params = param_sets[0]
+
     with conn:
         with conn.cursor() as cur:
+            cur.execute(final_query, params)
+            results = cur.fetchall()
+            return [
+                {
+                    "user_id": row[0],
+                    "reaction_count": row[1] or 0,
+                    "domain_name": row[2],
+                    "content": row[3]
+                } for row in results
+            ]
 
-            # Date filtering
-            date_filter = ""
-            if time_range == "week":
-                start_date = datetime.utcnow() - timedelta(days=7)
-                date_filter = "AND created_at >= %s"
-                date_params = [start_date]
-            elif time_range == "month":
-                start_date = datetime.utcnow() - timedelta(days=30)
-                date_filter = "AND created_at >= %s"
-                date_params = [start_date]
-            else:
-                date_params = []
-
-            # Media posts (image/gif/movie)
-            if post_type in ["image", "gif", "movie"]:
-                query = f"""
-                    SELECT media_url AS content, user_id,
-                           COALESCE(cardinality(reactors), 0) AS reaction_count
-                    FROM media_messages
-                    WHERE guild_id = %s AND media_type = %s {date_filter}
-                    ORDER BY reaction_count DESC
-                    LIMIT %s;
-                """
-                cur.execute(query, (guild_id, post_type, *date_params, limit))
-                return [
-                    {"content": row[0], "reaction_count": row[2], "user_id": row[1]}
-                    for row in cur.fetchall()
-                ]
-
-            # Link posts
-            elif post_type == "link":
-                query = f"""
-                    SELECT link AS content, domain_name, user_id,
-                           COALESCE(cardinality(reactors), 0) AS reaction_count
-                    FROM link_messages
-                    WHERE guild_id = %s {date_filter}
-                    ORDER BY reaction_count DESC
-                    LIMIT %s;
-                """
-                cur.execute(query, (guild_id, *date_params, limit))
-                return [
-                    {
-                        "content": row[0],
-                        "domain_name": row[1],
-                        "reaction_count": row[3],
-                        "user_id": row[2],
-                    }
-                    for row in cur.fetchall()
-                ]
-
-            # All content types
-            elif post_type == "all":
-                media_query = f"""
-                    SELECT media_url AS content, NULL AS domain_name, user_id,
-                           COALESCE(cardinality(reactors), 0) AS reaction_count
-                    FROM media_messages
-                    WHERE guild_id = %s {date_filter}
-                """
-                link_query = f"""
-                    SELECT link AS content, domain_name, user_id,
-                           COALESCE(cardinality(reactors), 0) AS reaction_count
-                    FROM link_messages
-                    WHERE guild_id = %s {date_filter}
-                """
-                combined_query = f"""
-                    ({media_query})
-                    UNION ALL
-                    ({link_query})
-                    ORDER BY reaction_count DESC
-                    LIMIT %s;
-                """
-                cur.execute(combined_query, (guild_id, *date_params, guild_id, *date_params, limit))
-                return [
-                    {
-                        "content": row[0],
-                        "domain_name": row[1],
-                        "reaction_count": row[3],
-                        "user_id": row[2],
-                    }
-                    for row in cur.fetchall()
-                ]
-
-            else:
-                raise ValueError("Invalid post_type specified.")
 
 def get_top_posters(post_type: str = "all", limit: int = 5, time_range: str = "all"):
     """

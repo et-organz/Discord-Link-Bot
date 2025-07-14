@@ -82,7 +82,7 @@ async def backfill_command(interaction: discord.Interaction):
 @app_commands.describe(post_type="Type of post", limit="Number of posts", time_range="Time filter (week/month/all)")
 async def top_posts(interaction: discord.Interaction, post_type: str = "all", limit: int = 5, time_range: str = "all"):
     try:
-        posts = db.get_top_posts(interaction.guild_id, post_type, time_range, limit)
+        posts = db.get_top_posts(interaction.guild_id, post_type, limit, time_range)
         if not posts:
             await interaction.response.send_message("No posts found.")
             return
@@ -90,16 +90,37 @@ async def top_posts(interaction: discord.Interaction, post_type: str = "all", li
         title_map = {
             "link": "Links", "image": "Images", "movie": "Videos", "gif": "GIFs", "all": "Posts"
         }
-        lines = [f"**Top {limit} {title_map.get(post_type, 'Posts')} ({time_range})**"]
+        header = f"**Top {limit} {title_map.get(post_type, 'Posts')} ({time_range})**"
+        
+        lines = [header]
         for item in posts:
             user = await client.fetch_user(item["user_id"])
-            domain = f"Domain: `{item['domain_name']}`, " if "domain_name" in item else ""
-            lines.append(f"- {domain}Reactions: {item['reaction_count']}, by {user.mention}, Content: {item['content']}")
+            domain = f"Domain: `{item['domain_name']}`, " if item.get("domain_name") else ""
+            line = f"- {domain}Reactions: {item['reaction_count']}, by {user.mention}, Content: {item['content']}"
+            lines.append(line)
+        
+        # Split lines into chunks <= 1900 chars (give some margin)
+        chunks = []
+        current_chunk = ""
+        for line in lines:
+            if len(current_chunk) + len(line) + 1 > 1900:
+                chunks.append(current_chunk)
+                current_chunk = ""
+            current_chunk += line + "\n"
+        if current_chunk:
+            chunks.append(current_chunk)
 
-        await interaction.response.send_message("\n".join(lines))
+        await interaction.response.send_message(chunks[0])
+        for chunk in chunks[1:]:
+            await interaction.followup.send(chunk)
+
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❗ Error fetching top posts.")
+        # If interaction is not responded to yet:
+        try:
+            await interaction.response.send_message("❗ Error fetching top posts.")
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send("❗ Error fetching top posts.")
 
 @client.tree.command(name="top_users", description="Get top users based on unique reactors.")
 @app_commands.describe(post_type="Type of post", limit="Number of users", time_range="Time filter (week/month/all)")

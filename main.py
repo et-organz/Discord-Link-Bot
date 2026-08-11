@@ -1,5 +1,4 @@
 import discord
-from discord.ext import commands
 from discord import app_commands
 import os
 from dotenv import load_dotenv
@@ -86,7 +85,7 @@ async def backfill_command(interaction: discord.Interaction, days: Optional[int]
         try:
             kwargs = {"limit": None, "oldest_first": True}
             if days is not None:
-                cutoff_time = datetime.now(UTC) - timedelta(days=days)
+                cutoff_time = datetime.now(timezone.utc) - timedelta(days=days)
                 kwargs["after"] = cutoff_time
 
             messages = [m async for m in channel.history(**kwargs) if not m.author.bot]
@@ -191,6 +190,25 @@ async def makegif(interaction: discord.Interaction, start_time: float, video_url
         if os.path.exists("temp_video.mp4"): os.remove("temp_video.mp4")
         if os.path.exists("output.gif"): os.remove("output.gif")
 
+@client.tree.command(name="fixlink", description="Convert a social media link (Instagram/X/TikTok/Reddit/Facebook) into an embed-friendly version.")
+@app_commands.describe(link="The link to convert")
+async def fixlink(interaction: discord.Interaction, link: str):
+    await interaction.response.defer()
+    converted = await convert_link(link)
+    if converted:
+        await interaction.followup.send(converted)
+    else:
+        await interaction.followup.send("❗ Couldn't produce a working embed for that link — either it's not a supported platform, or all backup embed services are currently down.")
+
+@client.tree.context_menu(name="Fix Link Embed")
+async def fixlink_context_menu(interaction: discord.Interaction, message: discord.Message):
+    await interaction.response.defer()
+    converted = await convert_link(message.content)
+    if converted:
+        await interaction.followup.send(converted)
+    else:
+        await interaction.followup.send("❗ Couldn't produce a working embed for that link — either it's not a supported platform, or all backup embed services are currently down.")
+
 @client.tree.command(name="contest", description="Show contest results for top link/media posters.")
 @app_commands.describe(period="Choose week or month")
 async def contest(interaction: discord.Interaction, period: str = "week"):
@@ -226,20 +244,30 @@ async def help_command(interaction: discord.Interaction):
         color=discord.Color.blurple()
     )
 
-    # Public command
+    # Public commands
     embed.add_field(
         name="/makegif <start_time> <youtube_url>",
         value="🎬 Creates a 5-second GIF starting from the specified time in a YouTube video.",
         inline=False
     )
 
-    # Mod-only commands
+    embed.add_field(
+        name="/fixlink <link>",
+        value="🔗 Converts an Instagram/X/TikTok/Reddit/Facebook link into an embed-friendly version.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Fix Link Embed (right-click a message → Apps)",
+        value="🔗 Same as /fixlink, but runs on the link already in an existing message.",
+        inline=False
+    )
+
     embed.add_field(
         name="/top_posts <post_type> [limit] [time_range]",
         value="🔝 Shows top posts by reaction count.\n"
               "• post_type: link, image, gif, movie, all\n"
-              "• time_range: week, month, all (default: all)\n"
-              "🔒 **Mod-only**",
+              "• time_range: week, month, all (default: all)",
         inline=False
     )
 
@@ -247,23 +275,23 @@ async def help_command(interaction: discord.Interaction):
         name="/top_users <post_type> [limit] [time_range]",
         value="👥 Shows top users by unique reactors.\n"
               "• post_type: link, image, gif, movie, all\n"
-              "• time_range: week, month, all (default: all)\n"
-              "🔒 **Mod-only**",
+              "• time_range: week, month, all (default: all)",
         inline=False
     )
 
     embed.add_field(
         name="/top_domain",
-        value="🌐 Shows the most frequently linked domain.\n🔒 **Mod-only**",
+        value="🌐 Shows the most frequently linked domain.",
         inline=False
     )
 
     embed.add_field(
         name="/contest [week|month]",
-        value="🏆 Shows contest results for top link and media posters based on unique reactions.\n🔒 **Mod-only**",
+        value="🏆 Shows contest results for top link and media posters based on unique reactions.",
         inline=False
     )
 
+    # Mod-only command
     embed.add_field(
         name="/backfill",
         value="📥 Manually trigger backfilling of messages in all text channels.\n🔒 **Mod-only**",
@@ -286,9 +314,10 @@ async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
 async def on_message(message):
     if message.author == client.user:
         return
-    converted = convert_link(message)
-    if converted:
-        await message.channel.send(converted)
-    db.insert_media(message)
+    try:
+        db.insert_media(message)
+    except Exception as e:
+        print(f"❗ Failed to insert message {message.id}: {e}")
 
-client.run(API_KEY)
+if __name__ == "__main__":
+    client.run(API_KEY)

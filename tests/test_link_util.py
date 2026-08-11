@@ -1,9 +1,13 @@
 import unittest
+import os
+import sys
 import re
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from collections import defaultdict
 
-from .. import link_util
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import link_util
 
 
 class MockMessage:
@@ -77,23 +81,47 @@ class TestUtilFunctions(unittest.IsolatedAsyncioTestCase):
             msg = MockMessage(url)
             self.assertEqual(link_util.get_url_type(msg), expected_type)
 
-    def test_convert_link_substitutes_platforms(self):
+    async def test_convert_link_uses_primary_backup_when_up(self):
         test_cases = {
-            "https://www.instagram.com/user": "https://www.instagramez.com/user",
-            "https://twitter.com/user/status/123": "https://twitterez.com/user/status/123",
-            "https://www.tiktok.com/@user/video/987654": "https://www.tiktokez.com/@user/video/987654",
-            "https://www.reddit.com/r/test/comments/xyz": "https://www.redditez.com/r/test/comments/xyz",
-            "https://www.facebook.com/reel/abc": "https://www.facebookez.com/reel/abc",
-            "https://www.unknownsite.com": None
+            "https://www.instagram.com/user": "toinstagram.com",
+            "https://twitter.com/user/status/123": "fxtwitter.com",
+            "https://www.tiktok.com/@user/video/987654": "tnktok.com",
+            "https://www.reddit.com/r/test/comments/xyz": "rxddit.com",
+            "https://www.facebook.com/reel/abc": "facebed.com",
         }
 
-        for url, expected in test_cases.items():
-            msg = MockMessage(url)
-            result = link_util.convert_link(msg)
-            if expected:
-                self.assertIn(expected.split(".")[0], result)
-            else:
-                self.assertIsNone(result)
+        with patch("link_util._domain_is_up", new=AsyncMock(return_value=True)):
+            for url, expected_domain in test_cases.items():
+                result = await link_util.convert_link(url)
+                self.assertIn(expected_domain, result)
+
+    async def test_convert_link_returns_bare_url_not_surrounding_text(self):
+        content = "check this out https://twitter.com/user/status/123 pretty cool right"
+        with patch("link_util._domain_is_up", new=AsyncMock(return_value=True)):
+            result = await link_util.convert_link(content)
+
+        self.assertEqual(result, "https://fxtwitter.com/user/status/123")
+
+    async def test_convert_link_returns_none_for_unrecognized_url(self):
+        with patch("link_util._domain_is_up", new=AsyncMock(return_value=True)):
+            result = await link_util.convert_link("https://www.unknownsite.com")
+        self.assertIsNone(result)
+
+    async def test_convert_link_falls_back_to_next_domain_when_primary_down(self):
+        async def fake_domain_is_up(url):
+            return "vxtwitter.com" in url  # fxtwitter.com (primary) reports down
+
+        with patch("link_util._domain_is_up", new=fake_domain_is_up):
+            result = await link_util.convert_link("https://twitter.com/user/status/123")
+
+        self.assertIn("vxtwitter.com", result)
+        self.assertNotIn("fxtwitter.com", result)
+
+    async def test_convert_link_returns_none_when_all_backups_down(self):
+        with patch("link_util._domain_is_up", new=AsyncMock(return_value=False)):
+            result = await link_util.convert_link("https://twitter.com/user/status/123")
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 
-INSTAGRAM_REGEX = r"(https?://)?(www\.)?instagram\.com/[A-Za-z0-9_.]+/?"
+INSTAGRAM_REGEX = r"(https?://)?(www\.)?instagram\.com/(?:(?:reel|reels|p|tv)/)?[A-Za-z0-9_.-]+/?"
 TWITTER_REGEX = r"(https?://)?(www\.)?(twitter|x)\.com/[A-Za-z0-9_]+/status/\d+"
 TIKTOK_REGEX = r"(https?://)?(www\.)?tiktok\.com/(t/[\w\d]+|@[\w\d_.]+/video/\d+)"
 REDDIT_REGEX = r"(https?://)?(www\.)?reddit\.com/r/\w+/comments/\w+"
@@ -67,7 +67,7 @@ def get_url_type(message):
 # directly, facebookez.com is dead, ddinstagram.com blocks Discord's bot UA) so
 # don't assume this list stays accurate forever.
 EMBED_FIX_DOMAINS = {
-    "instagram": ["toinstagram.com"],
+    "instagram": ["mbdinstagram.com", "toinstagram.com"],
     "twitter": ["fxtwitter.com", "vxtwitter.com", "fixupx.com"],
     "tiktok": ["tnktok.com", "vxtiktok.com"],
     "reddit": ["rxddit.com", "vxreddit.com"],
@@ -98,6 +98,13 @@ async def _get_session():
     return _session
 
 
+async def close_session():
+    global _session
+    if _session is not None and not _session.closed:
+        await _session.close()
+    _session = None
+
+
 def _with_host(url: str, new_host: str) -> str:
     parts = urlsplit(url if "://" in url else f"https://{url}")
     return urlunsplit(("https", new_host, parts.path, parts.query, parts.fragment))
@@ -107,7 +114,7 @@ async def _domain_is_up(url: str) -> bool:
     try:
         session = await _get_session()
         async with session.get(url, timeout=_LINK_CHECK_TIMEOUT, allow_redirects=True) as resp:
-            return resp.status < 500
+            return resp.status < 400
     except (aiohttp.ClientError, asyncio.TimeoutError):
         return False
 

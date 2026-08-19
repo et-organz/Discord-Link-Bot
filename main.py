@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 import db
 import gif_util
-from link_util import convert_link, count_links_in_channel
+from link_util import convert_link, count_links_in_channel, close_session
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -35,11 +35,36 @@ class MyClient(discord.Client):
             self.tree.copy_global_to(guild=guild)
         await self.tree.sync()
 
+    async def close(self):
+        await close_session()
+        await super().close()
+
 client = MyClient()
+
+async def run_backlog_process(since: datetime):
+    """
+    Backfills messages posted in every text channel of every guild since `since`,
+    used to catch up on messages missed during an unclean shutdown.
+    """
+    total_inserted = 0
+    for guild in client.guilds:
+        for channel in guild.text_channels:
+            try:
+                messages = [m async for m in channel.history(limit=None, oldest_first=True, after=since) if not m.author.bot]
+                count = db.backfill_messages_from_history(messages)
+                await count_links_in_channel(channel)
+                total_inserted += count
+                if count:
+                    print(f"Backlog: inserted {count} messages from #{channel.name} ({guild.name})")
+            except discord.Forbidden:
+                print(f"Backlog: no access to #{channel.name} ({guild.name})")
+            except Exception as e:
+                print(f"Backlog: error in #{channel.name} ({guild.name}): {e}")
+    print(f"Backlog complete. Inserted {total_inserted} messages total.")
 
 @client.event
 async def on_ready():
-    print(f'✅ Logged in as {client.user}')
+    print(f'Logged in as {client.user}')
     client.loop.create_task(periodic_status_writer())
 
     # Check for unclean shutdown:
@@ -55,14 +80,14 @@ async def on_ready():
             time_since = datetime.now(timezone.utc) - last_alive
 
             if time_since.total_seconds() > 90:
-                print("🛠️ Bot was offline for too long. Backlogging messages...")
-                # await run_backlog_process(last_alive)  # Add backlogging here
+                print("Bot was offline for too long. Backlogging messages...")
+                await run_backlog_process(last_alive)
             else:
-                print("✅ Clean or recent restart detected.")
+                print("Clean or recent restart detected.")
     except FileNotFoundError:
-        print("📂 No previous status file found. Assuming first launch.")
+        print("No previous status file found. Assuming first launch.")
     except ValueError as e:
-        print(f"⚠️ Failed to parse timestamp from status file: {e}")
+        print(f"Failed to parse timestamp from status file: {e}")
 # Moderator check
 def is_moderator(interaction: discord.Interaction) -> bool:
     return interaction.user.guild_permissions.manage_messages or interaction.user.guild_permissions.administrator
@@ -92,35 +117,36 @@ async def backfill_command(interaction: discord.Interaction, days: Optional[int]
             count = db.backfill_messages_from_history(messages)
             await count_links_in_channel(channel)
             total_inserted += count
-            print(f"✅ Inserted {count} messages from #{channel.name}")
+            print(f"Inserted {count} messages from #{channel.name}")
         except discord.Forbidden:
-            print(f"🚫 No access to #{channel.name}")
+            print(f"No access to #{channel.name}")
         except Exception as e:
-            print(f"❗ Error in {channel.name}: {e}")
+            print(f"Error in {channel.name}: {e}")
 
     await interaction.followup.send(f"✅ Backfill complete! Inserted {total_inserted} messages.")
 
 @client.tree.command(name="top_posts", description="Get top posts based on reaction count.")
 @app_commands.describe(post_type="Type of post", limit="Number of posts", time_range="Time filter (week/month/all)")
 async def top_posts(interaction: discord.Interaction, post_type: str = "all", limit: int = 5, time_range: str = "all"):
+    await interaction.response.defer()
     try:
         posts = db.get_top_posts(interaction.guild_id, post_type, limit, time_range)
         if not posts:
-            await interaction.response.send_message("No posts found.")
+            await interaction.followup.send("No posts found.")
             return
 
         title_map = {
             "link": "Links", "image": "Images", "movie": "Videos", "gif": "GIFs", "all": "Posts"
         }
         header = f"**Top {limit} {title_map.get(post_type, 'Posts')} ({time_range})**"
-        
+
         lines = [header]
         for item in posts:
             user = await client.fetch_user(item["user_id"])
             domain = f"Domain: `{item['domain_name']}`, " if item.get("domain_name") else ""
             line = f"- {domain}Reactions: {item['reaction_count']}, by {user.mention}, Content: {item['content']}"
             lines.append(line)
-        
+
         # Split lines into chunks <= 1900 chars (give some margin)
         chunks = []
         current_chunk = ""
@@ -132,48 +158,45 @@ async def top_posts(interaction: discord.Interaction, post_type: str = "all", li
         if current_chunk:
             chunks.append(current_chunk)
 
-        await interaction.response.send_message(chunks[0])
-        for chunk in chunks[1:]:
+        for chunk in chunks:
             await interaction.followup.send(chunk)
 
     except Exception as e:
         print(e)
-        # If interaction is not responded to yet:
-        try:
-            await interaction.response.send_message("❗ Error fetching top posts.")
-        except discord.errors.InteractionResponded:
-            await interaction.followup.send("❗ Error fetching top posts.")
+        await interaction.followup.send("❗ Error fetching top posts.")
 
 @client.tree.command(name="top_users", description="Get top users based on unique reactors.")
 @app_commands.describe(post_type="Type of post", limit="Number of users", time_range="Time filter (week/month/all)")
 async def top_users(interaction: discord.Interaction, post_type: str = "all", limit: int = 5, time_range: str = "all"):
+    await interaction.response.defer()
     try:
         posters = db.get_top_posters(post_type, limit, time_range)
         if not posters:
-            await interaction.response.send_message("No results found.")
+            await interaction.followup.send("No results found.")
             return
 
         lines = [f"🏆 Top {limit} {post_type} posters ({time_range}):"]
         for i, entry in enumerate(posters, 1):
             lines.append(f"{i}. <@{entry['user_id']}> with {entry['unique_reactors']} unique reactors")
 
-        await interaction.response.send_message("\n".join(lines))
+        await interaction.followup.send("\n".join(lines))
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❗ Error fetching top users.")
+        await interaction.followup.send("❗ Error fetching top users.")
 
 @client.tree.command(name="top_domain", description="Show the most linked domain in the server.")
 async def top_domain(interaction: discord.Interaction):
+    await interaction.response.defer()
     try:
         domain_data = db.get_top_domain(interaction.guild_id)
         if domain_data:
             domain, count = domain_data
-            await interaction.response.send_message(f"**Most Linked Domain:** `{domain}` with {count} links.")
+            await interaction.followup.send(f"**Most Linked Domain:** `{domain}` with {count} links.")
         else:
-            await interaction.response.send_message("No domains found.")
+            await interaction.followup.send("No domains found.")
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❗ Error fetching domain.")
+        await interaction.followup.send("❗ Error fetching domain.")
 
 @client.tree.command(name="makegif", description="Create a GIF from a YouTube video.")
 @app_commands.describe(start_time="Start time in seconds", video_url="YouTube video URL")
@@ -215,6 +238,7 @@ async def contest(interaction: discord.Interaction, period: str = "week"):
     if period not in ["week", "month"]:
         await interaction.response.send_message("Invalid period. Use 'week' or 'month'.")
         return
+    await interaction.response.defer()
     try:
         top_links = db.get_top_posters("link", 5, period)
         top_media = db.get_top_posters("all", 5, period)
@@ -231,10 +255,10 @@ async def contest(interaction: discord.Interaction, period: str = "week"):
         embed.add_field(name="🔗 Top Link Posters", value=format_entries(top_links), inline=False)
         embed.add_field(name="🖼️ Top Media Posters", value=format_entries(top_media), inline=False)
 
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
     except Exception as e:
         print(e)
-        await interaction.response.send_message("❗ Error fetching contest data.")
+        await interaction.followup.send("❗ Error fetching contest data.")
 
 @client.tree.command(name="help", description="Shows all available bot commands.")
 async def help_command(interaction: discord.Interaction):
@@ -317,7 +341,7 @@ async def on_message(message):
     try:
         db.insert_media(message)
     except Exception as e:
-        print(f"❗ Failed to insert message {message.id}: {e}")
+        print(f"Failed to insert message {message.id}: {e}")
 
 if __name__ == "__main__":
     client.run(API_KEY)

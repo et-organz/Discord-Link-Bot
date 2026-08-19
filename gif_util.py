@@ -15,6 +15,10 @@ def download_video(url, save_path):
         'format': 'best',  # Best available quality
         'outtmpl': save_path,  # Save path for the downloaded video
         'noplaylist': True,  # Don't download playlists, only single video
+        # YouTube's default web client formats are frequently broken by their
+        # server-side ad experiment (yt-dlp/yt-dlp#12482); the android client
+        # sidesteps it.
+        'extractor_args': {'youtube': {'player_client': ['android']}},
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:

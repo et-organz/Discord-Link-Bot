@@ -66,6 +66,10 @@ class TestUtilFunctions(unittest.IsolatedAsyncioTestCase):
         msg = MockMessage("No link here")
         self.assertIsNone(link_util.get_link_from_message(msg))
 
+    def test_get_link_from_message_instagram_reel_keeps_full_id(self):
+        msg = MockMessage("https://www.instagram.com/reel/DAbc123xyz/")
+        self.assertEqual(link_util.get_link_from_message(msg), "https://www.instagram.com/reel/DAbc123xyz/")
+
     def test_get_url_type_all_platforms(self):
         urls = {
             "https://www.instagram.com/username/": "instagram",
@@ -81,9 +85,14 @@ class TestUtilFunctions(unittest.IsolatedAsyncioTestCase):
             msg = MockMessage(url)
             self.assertEqual(link_util.get_url_type(msg), expected_type)
 
+    async def test_convert_link_keeps_full_instagram_reel_id(self):
+        with patch("link_util._domain_is_up", new=AsyncMock(return_value=True)):
+            result = await link_util.convert_link("https://www.instagram.com/reel/DAbc123xyz/")
+        self.assertEqual(result, "https://mbdinstagram.com/reel/DAbc123xyz/")
+
     async def test_convert_link_uses_primary_backup_when_up(self):
         test_cases = {
-            "https://www.instagram.com/user": "toinstagram.com",
+            "https://www.instagram.com/user": "mbdinstagram.com",
             "https://twitter.com/user/status/123": "fxtwitter.com",
             "https://www.tiktok.com/@user/video/987654": "tnktok.com",
             "https://www.reddit.com/r/test/comments/xyz": "rxddit.com",
